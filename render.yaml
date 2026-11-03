@@ -1,0 +1,11 @@
+# Render Blueprint (OPCIONAL).
+# Si subes el repo a GitHub, en Render puedes usar "New > Blueprint" y este
+# archivo crea el servicio automáticamente. Si prefieres hacerlo a mano, mira
+# el README (sección "Desplegar en Render").
+services:
+  - type: web
+    name: tf-vuelos
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health

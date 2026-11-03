@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Planificador de Vuelos · Complejidad Algorítmica</title>
+
+  <!-- Leaflet: la librería que dibuja el mapa interactivo -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Nuestros estilos -->
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <!-- Panel lateral: buscadores y resultados -->
+  <aside class="panel">
+    <header class="encabezado">
+      <h1>Planificador de Vuelos</h1>
+      <p>Compara la ruta más corta <strong>en distancia</strong> y <strong>en escalas</strong></p>
+    </header>
+
+    <!-- Buscador de origen -->
+    <div class="buscador">
+      <label for="origen">Origen</label>
+      <div class="campo">
+        <input id="origen" type="text" placeholder="Ej. LIM" autocomplete="off" />
+        <ul id="lista-origen" class="autocompletado"></ul>
+      </div>
+    </div>
+
+    <!-- Buscador de destino -->
+    <div class="buscador">
+      <label for="destino">Destino</label>
+      <div class="campo">
+        <input id="destino" type="text" placeholder="Ej. SCL" autocomplete="off" />
+        <ul id="lista-destino" class="autocompletado"></ul>
+      </div>
+    </div>
+
+    <button id="buscar" class="boton">Buscar ruta</button>
+
+    <!-- Mensajes de error / estado -->
+    <div id="mensaje" class="mensaje"></div>
+
+    <!-- Tarjetas con los resultados -->
+    <div id="resultados" class="resultados"></div>
+
+    <!-- Leyenda de colores -->
+    <footer class="leyenda">
+      <span><i class="linea dijkstra"></i> Dijkstra · menos km</span>
+      <span><i class="linea bfs"></i> BFS · menos escalas</span>
+    </footer>
+  </aside>
+
+  <!-- Mapa -->
+  <main id="mapa"></main>
+
+  <!-- Leaflet y nuestra lógica -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

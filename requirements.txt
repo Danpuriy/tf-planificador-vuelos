@@ -1,0 +1,4 @@
+# Dependencias del servidor web del TF.
+# FastAPI = framework del backend; uvicorn = servidor que lo ejecuta.
+fastapi>=0.115,<0.120
+uvicorn[standard]>=0.30,<0.35

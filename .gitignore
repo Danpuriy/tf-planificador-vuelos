@@ -1,0 +1,22 @@
+# Entorno virtual de Python
+.venv/
+venv/
+
+# Archivos generados por Python
+__pycache__/
+*.py[cod]
+
+# pytest / Playwright
+.pytest_cache/
+test-results/
+playwright-report/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Documentación interna (no se publica en el repo)
+GUIA_PARA_EL_GRUPO.md
+odd/

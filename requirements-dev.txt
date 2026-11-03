@@ -1,0 +1,8 @@
+# Dependencias solo para desarrollo y pruebas (no van a producción).
+-r requirements.txt
+pytest>=8,<9
+httpx>=0.27,<0.29
+
+# Pruebas end-to-end con navegador real.
+playwright>=1.40,<2
+pytest-playwright>=0.5,<1
