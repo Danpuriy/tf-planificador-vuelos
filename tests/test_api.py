@@ -123,3 +123,93 @@ def test_estaticos_se_sirven(cliente):
     for archivo in ("app.js", "styles.css"):
         assert cliente.get(f"/static/{archivo}").status_code == 200
     assert "tarjetaComparacion" in cliente.get("/static/app.js").text
+
+
+# ===========================================================================
+# TIEMPO, COSTO Y VALIDACIÓN CON BELLMAN-FORD
+# ===========================================================================
+def test_ruta_devuelve_tiempo_y_costo(cliente):
+    """Cada resultado debe traer duración y precio, no solo kilómetros."""
+    r = cliente.get(
+        "/api/ruta", params={"origen": "LIM", "destino": "BSB", "validar": True}
+    )
+    assert r.status_code == 200
+
+    datos = r.json()
+    for clave in ("bfs", "dijkstra", "bellman_ford"):
+        res = datos[clave]
+        assert res["tiempo_total_min"] > 0
+        assert res["costo_total_usd"] > 0
+
+
+def test_ruta_devuelve_detalle_por_tramo(cliente):
+    """Cada tramo debe traer aerolínea, equipo, tiempo y costo."""
+    r = cliente.get("/api/ruta", params={"origen": "LIM", "destino": "BSB"})
+    datos = r.json()
+
+    tramos = datos["dijkstra"]["detalle_tramos"]
+    assert len(tramos) == datos["dijkstra"]["tramos"]
+
+    for tramo in tramos:
+        assert tramo["aerolinea"]
+        assert tramo["avion"]
+        assert tramo["km"] > 0
+        assert tramo["tiempo_min"] > 0
+        assert tramo["costo_usd"] > 0
+
+
+def test_ruta_incluye_comparacion_de_tres_algoritmos(cliente):
+    """La respuesta debe traer la tabla comparativa completa."""
+    r = cliente.get(
+        "/api/ruta", params={"origen": "LIM", "destino": "BSB", "validar": True}
+    )
+    datos = r.json()
+
+    comparacion = datos["comparacion"]
+    assert len(comparacion) == 3
+    assert [c["algoritmo"] for c in comparacion] == ["BFS", "Dijkstra", "Bellman-Ford"]
+
+    for entrada in comparacion:
+        assert "visitados" in entrada
+        assert "tiempo_ms" in entrada
+        assert entrada["tiempo_ms"] >= 0
+
+
+def test_dijkstra_y_bellman_ford_coinciden_en_la_api(cliente):
+    """Validación de punta a punta: la web también debe ver la coincidencia."""
+    r = cliente.get(
+        "/api/ruta", params={"origen": "LIM", "destino": "BSB", "validar": True}
+    )
+    datos = r.json()
+
+    dij = datos["dijkstra"]
+    bf = datos["bellman_ford"]
+
+    assert bf["encontrada"] is True
+    assert bf["camino"] == dij["camino"]
+    assert bf["distancia_total_km"] == pytest.approx(dij["distancia_total_km"], abs=0.01)
+
+
+def test_bellman_ford_reporta_pasadas(cliente):
+    """Bellman-Ford debe informar cuántas pasadas necesitó."""
+    r = cliente.get(
+        "/api/ruta", params={"origen": "LIM", "destino": "BSB", "validar": True}
+    )
+    datos = r.json()
+
+    assert datos["bellman_ford"]["pasadas"] >= 1
+
+
+def test_ruta_por_defecto_no_corre_bellman_ford(cliente):
+    """Sin ?validar, la respuesta NO debe incluir Bellman-Ford ni la comparación.
+
+    Protege el camino rápido: Bellman-Ford es O(V·E) y no puede colarse en
+    cada búsqueda del usuario.
+    """
+    r = cliente.get("/api/ruta", params={"origen": "LIM", "destino": "BSB"})
+    assert r.status_code == 200
+
+    datos = r.json()
+    assert "bfs" in datos and "dijkstra" in datos
+    assert "bellman_ford" not in datos
+    assert "comparacion" not in datos

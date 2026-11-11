@@ -221,3 +221,152 @@ def test_bfs_y_dijkstra_contra_fuerza_bruta():
                     assert bfs.tramos == tramos
                     assert dij.encontrada is True
                     assert dij.distancia_total_km == pytest.approx(km, abs=1e-9)
+
+
+# ===========================================================================
+# BELLMAN-FORD: VALIDACIÓN CONTRA DIJKSTRA
+# ===========================================================================
+def test_bellman_ford_coincide_con_dijkstra():
+    """Bellman-Ford y Dijkstra deben dar la MISMA ruta y la MISMA distancia.
+
+    Es la prueba central del proyecto: con pesos no negativos, los dos
+    algoritmos resuelven el mismo problema de optimización. Si difieren,
+    hay un bug en alguno de los dos.
+    """
+    g = grafo_ejemplo()
+
+    dij = g.dijkstra_min_distancia("A", "D")
+    bf = g.bellman_ford_min_distancia("A", "D")
+
+    assert bf.encontrada is True
+    assert bf.camino == dij.camino
+    assert bf.distancia_total_km == pytest.approx(dij.distancia_total_km)
+
+
+def test_bellman_ford_coincide_con_dijkstra_en_grafos_aleatorios():
+    """La coincidencia se mantiene en 20 grafos aleatorios, para todo par."""
+    random.seed(99)
+
+    for _ in range(20):
+        nodos = [f"N{i}" for i in range(5)]
+        g = GrafoVuelos()
+        for nodo in nodos:
+            g.agregar_nodo(nodo)
+
+        for a, b in itertools.permutations(nodos, 2):
+            if random.random() < 0.4:
+                g.agregar_arista(a, b, round(random.uniform(1, 100), 2))
+
+        for origen in nodos:
+            for destino in nodos:
+                if origen == destino:
+                    continue
+
+                dij = g.dijkstra_min_distancia(origen, destino)
+                bf = g.bellman_ford_min_distancia(origen, destino)
+
+                assert bf.encontrada == dij.encontrada
+                if dij.encontrada:
+                    assert bf.distancia_total_km == pytest.approx(
+                        dij.distancia_total_km, abs=1e-9
+                    )
+
+
+def test_bellman_ford_terminacion_temprana():
+    """Nunca debe hacer las V-1 pasadas si el grafo converge antes."""
+    g = grafo_ejemplo()
+
+    bf = g.bellman_ford_min_distancia("A", "D")
+
+    assert bf.encontrada is True
+    assert bf.pasadas >= 1
+    assert bf.pasadas < g.num_nodos
+
+
+def test_bellman_ford_nodo_inexistente():
+    """Con un aeropuerto que no existe, no hay ruta."""
+    g = grafo_ejemplo()
+
+    assert g.bellman_ford_min_distancia("A", "Z").encontrada is False
+
+
+def test_bellman_ford_mismo_origen_y_destino():
+    """Origen igual a destino: camino trivial de un solo nodo."""
+    g = grafo_ejemplo()
+
+    bf = g.bellman_ford_min_distancia("A", "A")
+
+    assert bf.encontrada is True
+    assert bf.camino == ["A"]
+    assert bf.tramos == 0
+
+
+# ===========================================================================
+# MODELO DE TIEMPO Y COSTO
+# ===========================================================================
+def test_tiempo_incluye_escala():
+    """El tiempo total debe incluir los 90 min de conexión de cada escala."""
+    g = grafo_ejemplo()
+
+    ruta = g.dijkstra_min_distancia("A", "D")
+
+    assert ruta.escalas == 1
+    suma_tramos = sum(t["tiempo_min"] for t in ruta.detalle_tramos)
+    assert ruta.tiempo_total_min == pytest.approx(suma_tramos + 90.0, abs=0.2)
+
+
+def test_tiempo_directo_no_suma_escala():
+    """Un vuelo directo no tiene conexión: solo rodaje y crucero."""
+    g = grafo_ejemplo()
+
+    ruta = g.dijkstra_min_distancia("A", "B")
+
+    assert ruta.escalas == 0
+    suma_tramos = sum(t["tiempo_min"] for t in ruta.detalle_tramos)
+    assert ruta.tiempo_total_min == pytest.approx(suma_tramos, abs=0.2)
+
+
+def test_costo_es_deterministico():
+    """La misma ruta debe costar siempre lo mismo, entre llamadas y procesos."""
+    from algoritmos import costo_tramo_usd
+
+    primero = costo_tramo_usd("LIM", "GRU", 3474.66)
+    segundo = costo_tramo_usd("LIM", "GRU", 3474.66)
+
+    assert primero == pytest.approx(segundo)
+
+
+def test_costo_positivo():
+    """Ningún tramo puede costar cero o menos, con cualquier distancia."""
+    from algoritmos import costo_tramo_usd
+
+    for km in (0.0, 1.0, 500.0, 3474.66, 20000.0):
+        assert costo_tramo_usd("LIM", "BSB", km) > 0.0
+
+
+def test_detalle_tramos_trae_aerolinea_y_equipo():
+    """Cada tramo debe llevar el nombre de la aerolínea y el equipo."""
+    g = GrafoVuelos()
+    for codigo in ("A", "B", "C"):
+        g.agregar_nodo(codigo)
+
+    g.agregar_arista("A", "B", 100.0, "Aerolínea Uno", "A320")
+    g.agregar_arista("B", "C", 200.0, "Aerolínea Dos", "B737")
+
+    ruta = g.dijkstra_min_distancia("A", "C")
+
+    assert len(ruta.detalle_tramos) == 2
+    assert ruta.detalle_tramos[0]["aerolinea"] == "Aerolínea Uno"
+    assert ruta.detalle_tramos[0]["avion"] == "A320"
+    assert ruta.detalle_tramos[1]["aerolinea"] == "Aerolínea Dos"
+    assert ruta.detalle_tramos[1]["avion"] == "B737"
+
+
+def test_costo_total_es_la_suma_de_los_tramos():
+    """El costo total del viaje debe ser la suma exacta de sus tramos."""
+    g = grafo_ejemplo()
+
+    ruta = g.dijkstra_min_distancia("A", "D")
+    suma = sum(t["costo_usd"] for t in ruta.detalle_tramos)
+
+    assert ruta.costo_total_usd == pytest.approx(suma, abs=0.05)

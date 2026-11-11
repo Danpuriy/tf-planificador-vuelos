@@ -60,3 +60,29 @@ def test_no_hay_ruta_entre_aeropuertos_desconectados(grafo_e_info):
     aislado = sin_salidas[0]
     assert grafo.bfs_min_escalas(aislado, "LIM").encontrada is False
     assert grafo.dijkstra_min_distancia(aislado, "LIM").encontrada is False
+
+
+# ===========================================================================
+# AEROLÍNEAS Y EQUIPO REALES
+# ===========================================================================
+def test_las_aristas_tienen_aerolinea_real(grafo_e_info):
+    """El grafo real debe traer nombres de aerolínea, no el valor por defecto."""
+    grafo, _ = grafo_e_info
+
+    ruta = grafo.dijkstra_min_distancia("LIM", "BSB")
+    assert ruta.encontrada is True
+
+    for tramo in ruta.detalle_tramos:
+        assert tramo["aerolinea"]
+        assert tramo["aerolinea"] != "Desconocida"
+
+
+def test_las_aristas_tienen_equipo(grafo_e_info):
+    """routes.dat trae el equipo declarado en la columna 8."""
+    grafo, _ = grafo_e_info
+
+    ruta = grafo.dijkstra_min_distancia("LIM", "BSB")
+
+    for tramo in ruta.detalle_tramos:
+        assert tramo["avion"]
+        assert tramo["avion"] != "—"

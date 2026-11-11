@@ -12,7 +12,7 @@ Este archivo es el "puente" entre los algoritmos y el navegador.
         GET /health               -> chequeo de salud (lo usa Render)
         GET /api/estadisticas     -> números del grafo
         GET /api/aeropuertos?q=   -> autocompletado de aeropuertos
-        GET /api/ruta?origen=&destino= -> BFS + Dijkstra de una ruta
+        GET /api/ruta?origen=&destino= -> BFS + Dijkstra + Bellman-Ford de una ruta
   3) ARRANQUE LOCAL: al final del archivo.
 
 ¿QUÉ ES UN ENDPOINT?
@@ -61,7 +61,7 @@ print("[servidor] Dataset listo. Servidor preparado.")
 # ===========================================================================
 app = FastAPI(
     title="Planificador de Vuelos",
-    description="Rutas óptimas con BFS y Dijkstra sobre la red aérea mundial.",
+    description="Rutas óptimas con BFS, Dijkstra y Bellman-Ford sobre la red aérea mundial.",
     version="1.0.0",
 )
 
@@ -137,12 +137,34 @@ def _resultado_publico(resultado: ResultadoRuta, tiempo_ms: float) -> dict:
 
     Las coordenadas (lat/lon) de cada aeropuerto del camino son lo que usa
     el mapa para dibujar la ruta. Por eso las incluimos acá.
+
+    `detalle_tramos` ya viene armado desde algoritmos.py: un dict por vuelo
+    con aerolínea, equipo, kilómetros, minutos y costo.
     """
     datos = resultado.a_diccionario()
     datos["tiempo_ms"] = round(tiempo_ms, 3)
     # Puntos con coordenadas, para dibujar la línea en el mapa.
     datos["puntos"] = [_info_publica(iata) for iata in resultado.camino]
     return datos
+
+
+def _entrada_comparacion(resultado: ResultadoRuta, tiempo_ms: float) -> dict:
+    """Versión liviana de un resultado, solo para la tabla de comparación.
+
+    La comparación no necesita coordenadas ni el detalle de cada tramo:
+    alcanza con qué algoritmo, qué ruta, cuánto midió y cuánto tardó.
+    """
+    return {
+        "algoritmo": resultado.algoritmo,
+        "encontrada": resultado.encontrada,
+        "camino": resultado.camino,
+        "distancia_total_km": round(resultado.distancia_total_km, 2),
+        "tiempo_total_min": round(resultado.tiempo_total_min, 0),
+        "costo_total_usd": round(resultado.costo_total_usd, 2),
+        "visitados": resultado.visitados,
+        "pasadas": resultado.pasadas,
+        "tiempo_ms": round(tiempo_ms, 3),
+    }
 
 
 # ===========================================================================
@@ -199,21 +221,30 @@ def buscar_aeropuertos(q: str = "", limite: int = 12) -> list[dict]:
 
 
 # ===========================================================================
-# ENDPOINT: calcular la ruta (BFS + Dijkstra)
+# ENDPOINT: calcular la ruta (BFS + Dijkstra + Bellman-Ford)
 # ===========================================================================
 @app.get("/api/ruta")
-def calcular_ruta(origen: str, destino: str):
-    """Calcula la ruta con BFS y con Dijkstra y devuelve ambos resultados.
+def calcular_ruta(origen: str, destino: str, validar: bool = False):
+    """Calcula la ruta con BFS y Dijkstra, y opcionalmente valida con Bellman-Ford.
+
+    PARÁMETRO `validar`:
+        False (por defecto) -> BFS + Dijkstra. Camino rápido (~0.5 ms).
+        True                -> agrega Bellman-Ford y la tabla de comparación.
+                               Cuesta ~16 ms extra porque Bellman-Ford es O(V·E).
 
     PSEUDOCÓDIGO:
         1. Normalizar origen y destino a mayúsculas.
         2. Si alguno no existe en el grafo -> responder error 404.
         3. Medir tiempo y ejecutar BFS   -> resultado_bfs.
         4. Medir tiempo y ejecutar Dijkstra -> resultado_dijkstra.
-        5. Devolver ambos con su información y coordenadas.
+        5. Si `validar` es True:
+             a. Medir tiempo y ejecutar Bellman-Ford -> resultado_bellman.
+             b. Agregar la tabla de comparación de los tres.
+        6. Devolver los resultados con su información y coordenadas.
 
     COMPLEJIDAD:
-        BFS: O(V+E) · Dijkstra: O((V+E) log V). En la práctica, milisegundos.
+        BFS: O(V+E) · Dijkstra: O((V+E) log V) · Bellman-Ford: O(V·E) con
+        terminación temprana. Bellman-Ford solo corre si se pide.
     """
     o = origen.strip().upper()
     d = destino.strip().upper()
@@ -240,13 +271,36 @@ def calcular_ruta(origen: str, destino: str):
     resultado_dijkstra = GRAFO.dijkstra_min_distancia(o, d)
     tiempo_dijkstra = (time.perf_counter() - inicio_dijkstra) * 1000
 
-    # Paso 5.
-    return {
+    # Paso 5: respuesta base. Es el camino rápido: dos algoritmos, ~0.5 ms.
+    respuesta = {
         "origen": _info_publica(o),
         "destino": _info_publica(d),
         "bfs": _resultado_publico(resultado_bfs, tiempo_bfs),
         "dijkstra": _resultado_publico(resultado_dijkstra, tiempo_dijkstra),
     }
+
+    # Paso 6: validación opcional con Bellman-Ford.
+    #
+    # ¿POR QUÉ ES OPCIONAL?
+    #   Bellman-Ford es O(V·E): en este grafo tarda ~16 ms contra ~0.5 ms de
+    #   BFS+Dijkstra juntos. Correrlo en cada búsqueda multiplicaría por ~31 el
+    #   trabajo del endpoint para hacer una comprobación que el usuario no pidió.
+    #   Solo se ejecuta cuando el cliente lo pide explícitamente con ?validar=true,
+    #   que es lo que hace el panel de validación de la web.
+    if validar:
+        inicio_bellman = time.perf_counter()
+        resultado_bellman = GRAFO.bellman_ford_min_distancia(o, d)
+        tiempo_bellman = (time.perf_counter() - inicio_bellman) * 1000
+
+        respuesta["bellman_ford"] = _resultado_publico(resultado_bellman, tiempo_bellman)
+        respuesta["comparacion"] = [
+            _entrada_comparacion(resultado_bfs, tiempo_bfs),
+            _entrada_comparacion(resultado_dijkstra, tiempo_dijkstra),
+            _entrada_comparacion(resultado_bellman, tiempo_bellman),
+        ]
+
+    # Paso 7.
+    return respuesta
 
 
 # ===========================================================================

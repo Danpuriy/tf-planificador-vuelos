@@ -23,15 +23,46 @@ Curso : 1ACC0184 - Complejidad Algorítmica (UPC, 2026-20)
 # math     -> funciones matemáticas (seno, coseno, raíz, radianes).
 # deque    -> una cola doble eficiente que usa BFS.
 # dataclass-> decorador que crea clases simples para guardar datos.
+# hashlib  -> hash estable para que el precio de una ruta no cambie entre ejecuciones.
+# NamedTuple -> tupla inmutable con nombres de campo (la usamos para la arista).
 from __future__ import annotations
 
+import hashlib
 import heapq
 import math
 from collections import deque
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 # Radio medio de la Tierra en kilómetros. Lo necesita la fórmula de Haversine.
 RADIO_TIERRA_KM = 6371.0
+
+
+# ===========================================================================
+# PARTE 0: SUPUESTOS DEL MODELO DE TIEMPO Y COSTO
+# ===========================================================================
+# Estos números NO salen del dataset: son supuestos declarados del proyecto.
+# Van acá arriba, con nombre y en un solo lugar, para poder citarlos en el
+# informe y para que cualquiera pueda cambiarlos sin buscar por todo el archivo.
+
+# Velocidad de crucero típica de un avión comercial de pasajeros.
+VELOCIDAD_CRUCERO_KMH = 850.0
+
+# Minutos que se pierden en cada tramo por rodaje, despegue y aterrizaje.
+TIEMPO_RODAJE_MIN = 45.0
+
+# Minutos mínimos de conexión entre dos tramos (la escala).
+TIEMPO_ESCALA_MIN = 90.0
+
+# Costo fijo de emitir un pasaje (tasas, handling, servicio a bordo).
+TARIFA_BASE_USD = 40.0
+
+# Costo variable por kilómetro volado.
+TARIFA_POR_KM_USD = 0.09
+
+# Variación máxima de precio por ruta (±8%), para que no todas las rutas
+# de la misma distancia cuesten exactamente lo mismo.
+VARIACION_MAX = 0.08
 
 
 # ===========================================================================
@@ -73,23 +104,101 @@ def distancia_haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> f
 
 
 # ===========================================================================
+# PARTE 1.B: TIEMPO Y COSTO (modelo declarado, no dato real)
+# ===========================================================================
+def factor_precio(origen: str, destino: str) -> float:
+    """Factor de variación de precio para una ruta, entre 0.92 y 1.08.
+
+    QUÉ HACE:
+        Convierte el par (origen, destino) en un número estable y lo lleva al
+        rango [1 - VARIACION_MAX, 1 + VARIACION_MAX].
+
+    POR QUÉ HASH Y NO random:
+        `random` devolvería un precio distinto en cada llamada. Necesitamos que
+        la misma ruta cueste siempre lo mismo: para que la web no cambie los
+        precios al recargar, y para que los tests sean reproducibles.
+        Tampoco sirve el `hash()` de Python porque cambia entre procesos.
+
+    COMPLEJIDAD: O(1).
+    """
+    digest = hashlib.sha256(f"{origen}-{destino}".encode("utf-8")).digest()
+
+    # Tomamos los primeros 4 bytes como entero sin signo y lo normalizamos a [0, 1).
+    entero = int.from_bytes(digest[:4], "big")
+    proporcion = entero / 2**32
+
+    # Llevamos [0, 1) a [1 - VARIACION_MAX, 1 + VARIACION_MAX].
+    return 1.0 + (proporcion * 2.0 - 1.0) * VARIACION_MAX
+
+
+def tiempo_tramo_min(km: float) -> float:
+    """Minutos de vuelo de un tramo: crucero + rodaje.
+
+    MODELO: (km / VELOCIDAD_CRUCERO_KMH) horas, más TIEMPO_RODAJE_MIN minutos.
+
+    COMPLEJIDAD: O(1).
+    """
+    return (km / VELOCIDAD_CRUCERO_KMH) * 60.0 + TIEMPO_RODAJE_MIN
+
+
+def costo_tramo_usd(origen: str, destino: str, km: float) -> float:
+    """Costo estimado de un tramo en dólares.
+
+    MODELO: TARIFA_BASE_USD + km * TARIFA_POR_KM_USD, ajustado por el factor
+    de variación de la ruta.
+
+    COMPLEJIDAD: O(1).
+    """
+    base = TARIFA_BASE_USD + km * TARIFA_POR_KM_USD
+    return base * factor_precio(origen, destino)
+
+
+# ===========================================================================
 # PARTE 2: EL RESULTADO DE UNA BÚSQUEDA
 # ===========================================================================
+class Arista(NamedTuple):
+    """Un vuelo dirigido dentro de la lista de adyacencia.
+
+    POR QUÉ UNA NamedTuple Y NO UNA TUPLA PELADA:
+        Antes la arista era `(vecino, km)`. Ahora necesita cuatro datos.
+        Con una tupla normal, cada bucle tendría que escribir
+        `for vecino, km, _aerolinea, _avion in ...`, que es ruido puro.
+        Con NamedTuple se lee `arista.vecino` y `arista.km`, y sigue siendo
+        inmutable y liviana (no crea objetos con __dict__).
+
+    Campos:
+        vecino:    Número interno del aeropuerto de destino.
+        km:        Distancia Haversine del tramo (el peso del grafo).
+        aerolinea: Nombre real de la aerolínea, según airlines.dat.
+        avion:     Equipo declarado en routes.dat (ej. "A320", "789").
+    """
+
+    vecino: int
+    km: float
+    aerolinea: str = "Desconocida"
+    avion: str = "—"
+
+
 @dataclass
 class ResultadoRuta:
     """Molde con el resultado de una búsqueda de ruta.
 
-    Sirve para que BFS y Dijkstra devuelvan EXACTAMENTE la misma forma de datos.
-    Así el frontend (la web) no tiene que saber qué algoritmo se usó.
+    Sirve para que BFS, Dijkstra y Bellman-Ford devuelvan EXACTAMENTE la misma
+    forma de datos. Así el frontend (la web) no tiene que saber qué algoritmo
+    se usó.
 
     Campos:
-        algoritmo:          "BFS" o "Dijkstra".
+        algoritmo:          "BFS", "Dijkstra" o "Bellman-Ford".
         encontrada:         True si existe un camino.
         camino:             Lista de códigos IATA, del origen al destino.
         distancia_total_km: Suma de los pesos (km) a lo largo del camino.
         tramos:             Cantidad de vuelos (aristas).
         escalas:            Aeropuertos intermedios = tramos - 1.
         visitados:          Nodos que el algoritmo tuvo que revisar (para el informe).
+        pasadas:            Vueltas del bucle externo (solo Bellman-Ford la usa).
+        tiempo_total_min:   Duración del viaje completo, incluidas las escalas.
+        costo_total_usd:    Suma de los costos estimados de cada tramo.
+        detalle_tramos:     Un dict por tramo, con aerolínea, equipo, tiempo y costo.
     """
 
     algoritmo: str
@@ -99,6 +208,10 @@ class ResultadoRuta:
     tramos: int = 0
     escalas: int = 0
     visitados: int = 0
+    pasadas: int = 0
+    tiempo_total_min: float = 0.0
+    costo_total_usd: float = 0.0
+    detalle_tramos: list[dict] = field(default_factory=list)
 
     def a_diccionario(self) -> dict:
         """Convierte el resultado a un diccionario (esto es lo que viaja a la web)."""
@@ -110,6 +223,10 @@ class ResultadoRuta:
             "tramos": self.tramos,
             "escalas": self.escalas,
             "visitados": self.visitados,
+            "pasadas": self.pasadas,
+            "tiempo_total_min": round(self.tiempo_total_min, 0),
+            "costo_total_usd": round(self.costo_total_usd, 2),
+            "detalle_tramos": self.detalle_tramos,
         }
 
 
@@ -121,13 +238,14 @@ class GrafoVuelos:
 
     QUÉ HACE:
         Guarda aeropuertos (nodos) y vuelos (aristas con peso en km).
-        Da dos métodos de búsqueda: bfs_min_escalas() y dijkstra_min_distancia().
+        Da tres métodos de búsqueda: bfs_min_escalas(), dijkstra_min_distancia()
+        y bellman_ford_min_distancia().
 
     CÓMO GUARDA LOS DATOS (importante para entender):
         _indice_de:  {"LIM": 0, "SCL": 1, ...}   -> de código IATA a número.
         _iata_de:    ["LIM", "SCL", ...]         -> de número a código IATA.
-        _adyacencia: [[ (1, 2450.0), ... ], ...] -> para cada aeropuerto,
-                     la lista de (vecino, kilómetros).
+        _adyacencia: [[ Arista(1, 2450.0, "LATAM", "A320"), ... ], ...]
+                     -> para cada aeropuerto, la lista de vuelos de salida.
 
     ¿POR QUÉ NÚMEROS Y NO TEXTOS?
         Buscar y comparar números enteros es más rápido que comparar textos,
@@ -136,9 +254,9 @@ class GrafoVuelos:
 
     def __init__(self) -> None:
         # Empezamos con todo vacío.
-        self._indice_de: dict[str, int] = {}                  # IATA -> número
-        self._iata_de: list[str] = []                         # número -> IATA
-        self._adyacencia: list[list[tuple[int, float]]] = []  # número -> [(vecino, km)]
+        self._indice_de: dict[str, int] = {}          # IATA -> número
+        self._iata_de: list[str] = []                 # número -> IATA
+        self._adyacencia: list[list[Arista]] = []     # número -> [Arista]
 
     # ------------------------------------------------------------------
     # 3.A) CONSTRUIR EL GRAFO
@@ -170,16 +288,27 @@ class GrafoVuelos:
         # Paso 4.
         return indice
 
-    def agregar_arista(self, origen: str, destino: str, peso: float) -> bool:
+    def agregar_arista(
+        self,
+        origen: str,
+        destino: str,
+        peso: float,
+        aerolinea: str = "Desconocida",
+        avion: str = "—",
+    ) -> bool:
         """Agrega un vuelo dirigido origen -> destino con su distancia en km.
 
         Devuelve False si algún aeropuerto no existe o si el vuelo ya estaba.
+
+        `aerolinea` y `avion` son opcionales para que el grafo se pueda usar en
+        pruebas sin cargar el dataset completo. En la aplicación real siempre
+        vienen de routes.dat y airlines.dat.
 
         PSEUDOCÓDIGO:
             1. Si origen o destino no existen -> devolver False.
             2. Obtener los números internos de origen y destino.
             3. Si ya hay una arista hacia ese destino -> devolver False (evitar duplicado).
-            4. Agregar (destino, peso) a la lista del origen.
+            4. Agregar la Arista(destino, peso, aerolínea, avión) a la lista del origen.
             5. Devolver True.
 
         COMPLEJIDAD: O(grado de salida del origen) por revisar duplicados.
@@ -193,12 +322,12 @@ class GrafoVuelos:
         v = self._indice_de[destino]
 
         # Paso 3: evitar la misma ruta dos veces (varias aerolíneas, misma ruta).
-        for existente, _ in self._adyacencia[u]:
-            if existente == v:
+        for existente in self._adyacencia[u]:
+            if existente.vecino == v:
                 return False
 
         # Paso 4.
-        self._adyacencia[u].append((v, peso))
+        self._adyacencia[u].append(Arista(v, peso, aerolinea, avion))
         return True
 
     # ------------------------------------------------------------------
@@ -280,7 +409,9 @@ class GrafoVuelos:
             u = cola.popleft()   # sacar el primero de la cola (FIFO)
             visitados += 1
 
-            for v, _ in self._adyacencia[u]:
+            for arista in self._adyacencia[u]:
+                v = arista.vecino
+
                 if visto[v]:
                     continue   # ya lo habíamos alcanzado por un camino igual de corto
 
@@ -363,8 +494,9 @@ class GrafoVuelos:
                 break   # salida temprana: ya tenemos la distancia mínima al destino
 
             # Paso 6d.
-            for v, peso in self._adyacencia[u]:
-                nueva_distancia = distancia_actual + peso
+            for arista in self._adyacencia[u]:
+                v = arista.vecino
+                nueva_distancia = distancia_actual + arista.km
                 if nueva_distancia < distancia[v]:
                     distancia[v] = nueva_distancia
                     padre[v] = u
@@ -378,10 +510,118 @@ class GrafoVuelos:
         return self._construir_resultado("Dijkstra", padre, inicio, objetivo, visitados)
 
     # ------------------------------------------------------------------
-    # 3.E) FUNCIONES INTERNAS (las usan BFS y Dijkstra)
+    # 3.D-bis) BELLMAN-FORD: VALIDACIÓN DE DIJKSTRA
+    # ------------------------------------------------------------------
+    def bellman_ford_min_distancia(self, origen: str, destino: str) -> ResultadoRuta:
+        """Bellman-Ford: camino de menor distancia, por relajación repetida.
+
+        QUÉ HACE:
+            Repite V-1 veces un barrido sobre TODAS las aristas del grafo,
+            mejorando la distancia cada vez que encuentra un atajo. No usa
+            montículo ni cola: es fuerza bruta ordenada.
+
+        ¿POR QUÉ ESTÁ ACÁ SI DIJKSTRA YA RESUELVE LO MISMO?
+            Porque el curso pide comparar algoritmos. Bellman-Ford sirve para
+            dos cosas en este proyecto:
+
+              1. VALIDACIÓN. Con pesos no negativos, los dos DEBEN devolver la
+                 misma ruta. Si algún día no coinciden, hay un bug. Eso es lo
+                 que prueba tests/test_algoritmos.py.
+              2. CONTRASTE DE COSTO. Es O(V·E) contra O((V+E) log V) de
+                 Dijkstra. La diferencia se mide y se lleva al informe.
+
+        ¿CUÁNDO SERÍA OBLIGATORIO BELLMAN-FORD?
+            Si el grafo tuviera pesos negativos, Dijkstra daría resultados
+            incorrectos y Bellman-Ford no. Nuestros pesos son kilómetros:
+            nunca negativos. Por eso acá es validación, no reemplazo.
+
+        PSEUDOCÓDIGO:
+            1. Si origen o destino no existen -> no encontrada.
+            2. Si origen == destino -> camino trivial [origen].
+            3. distancia[] = infinito, padre[] = -1, distancia[inicio] = 0.
+            4. Repetir hasta V-1 veces:
+                 a. relajado = False
+                 b. Para cada nodo u y cada arista (u -> v):
+                      si distancia[u] + km < distancia[v] -> mejorar y relajado = True
+                 c. Si NO se relajó nada -> cortar (TERMINACIÓN TEMPRANA).
+            5. Si distancia[destino] es infinito -> no encontrada.
+            6. Reconstruir el camino y devolver.
+
+        TERMINACIÓN TEMPRANA:
+            Si una pasada completa no mejora ninguna distancia, ninguna pasada
+            siguiente puede mejorarla tampoco. Cortar ahí es lo que hace que
+            este Bellman-Ford no sea siempre O(V·E) en la práctica.
+
+        COMPLEJIDAD: O(V·E) en el peor caso; con terminación temprana suele
+        cortar mucho antes. Memoria O(V).
+        """
+        # Paso 1.
+        if origen not in self._indice_de or destino not in self._indice_de:
+            return ResultadoRuta("Bellman-Ford", encontrada=False)
+
+        inicio = self._indice_de[origen]
+        objetivo = self._indice_de[destino]
+
+        # Paso 2.
+        if inicio == objetivo:
+            return ResultadoRuta(
+                "Bellman-Ford", encontrada=True, camino=[origen], visitados=1, pasadas=0
+            )
+
+        n = len(self._adyacencia)
+        infinito = float("inf")
+
+        # Paso 3.
+        distancia = [infinito] * n
+        padre = [-1] * n
+        distancia[inicio] = 0.0
+
+        visitados = 0
+        pasadas = 0
+
+        # Paso 4: como máximo V-1 pasadas.
+        for _ in range(n - 1):
+            relajado = False
+            pasadas += 1
+
+            for u in range(n):
+                if distancia[u] == infinito:
+                    continue   # todavía no se llegó a u, no hay nada que propagar
+
+                for arista in self._adyacencia[u]:
+                    nueva = distancia[u] + arista.km
+                    if nueva < distancia[arista.vecino]:
+                        distancia[arista.vecino] = nueva
+                        padre[arista.vecino] = u
+                        visitados += 1
+                        relajado = True
+
+            # Paso 4c: terminación temprana.
+            if not relajado:
+                break
+
+        # Paso 5.
+        if distancia[objetivo] == infinito:
+            return ResultadoRuta(
+                "Bellman-Ford", encontrada=False, visitados=visitados, pasadas=pasadas
+            )
+
+        # Paso 6.
+        return self._construir_resultado(
+            "Bellman-Ford", padre, inicio, objetivo, visitados, pasadas
+        )
+
+    # ------------------------------------------------------------------
+    # 3.E) FUNCIONES INTERNAS (las usan BFS, Dijkstra y Bellman-Ford)
     # ------------------------------------------------------------------
     def _construir_resultado(
-        self, algoritmo: str, padre: list[int], inicio: int, objetivo: int, visitados: int
+        self,
+        algoritmo: str,
+        padre: list[int],
+        inicio: int,
+        objetivo: int,
+        visitados: int,
+        pasadas: int = 0,
     ) -> ResultadoRuta:
         """Reconstruye el camino desde los punteros 'padre' y calcula sus métricas.
 
@@ -389,8 +629,10 @@ class GrafoVuelos:
             1. Empezar en el objetivo y "subir" por padre[] hasta el inicio.
             2. Dar vuelta la lista para que quede inicio -> destino.
             3. Convertir números a códigos IATA.
-            4. Sumar los pesos del camino (distancia total).
-            5. Calcular tramos (aristas) y escalas (intermedios).
+            4. Recorrer el camino tramo por tramo, buscando la Arista de cada uno,
+               y acumular distancia, tiempo y costo en detalle_tramos.
+            5. Sumar el tiempo de las escalas (TIEMPO_ESCALA_MIN por intermedio).
+            6. Calcular tramos (aristas) y escalas (intermedios).
         """
         # Paso 1: caminar hacia atrás.
         camino_idx: list[int] = []
@@ -406,43 +648,77 @@ class GrafoVuelos:
 
         # Protección: si el camino no arranca en el inicio, algo falló.
         if not camino_idx or camino_idx[0] != inicio:
-            return ResultadoRuta(algoritmo, encontrada=False, visitados=visitados)
+            return ResultadoRuta(algoritmo, encontrada=False, visitados=visitados, pasadas=pasadas)
 
         # Paso 3.
         camino = [self._iata_de[i] for i in camino_idx]
 
-        # Paso 4.
-        total = self._distancia_camino(camino_idx)
+        # Paso 4: un dict por tramo, con todo lo que necesita la web.
+        total_km = 0.0
+        total_min = 0.0
+        total_usd = 0.0
+        detalle: list[dict] = []
 
-        # Paso 5.
+        for a, b in zip(camino_idx, camino_idx[1:]):
+            arista = self._buscar_arista(a, b)
+            if arista is None:
+                # No debería pasar: el camino salió de la adyacencia.
+                continue
+
+            minutos = tiempo_tramo_min(arista.km)
+            dolares = costo_tramo_usd(self._iata_de[a], self._iata_de[b], arista.km)
+
+            total_km += arista.km
+            total_min += minutos
+            total_usd += dolares
+
+            detalle.append(
+                {
+                    "de": self._iata_de[a],
+                    "a": self._iata_de[b],
+                    "km": round(arista.km, 2),
+                    "aerolinea": arista.aerolinea,
+                    "avion": arista.avion,
+                    "tiempo_min": round(minutos, 1),
+                    "costo_usd": round(dolares, 2),
+                }
+            )
+
+        # Paso 5: cada escala (aeropuerto intermedio) suma tiempo de conexión.
         tramos = len(camino) - 1
+        escalas = max(tramos - 1, 0)   # directo = 0 escalas
+        total_min += escalas * TIEMPO_ESCALA_MIN
+
+        # Paso 6.
         return ResultadoRuta(
             algoritmo=algoritmo,
             encontrada=True,
             camino=camino,
-            distancia_total_km=total,
+            distancia_total_km=total_km,
             tramos=tramos,
-            escalas=max(tramos - 1, 0),   # directo = 0 escalas
+            escalas=escalas,
             visitados=visitados,
+            pasadas=pasadas,
+            tiempo_total_min=total_min,
+            costo_total_usd=total_usd,
+            detalle_tramos=detalle,
         )
 
-    def _distancia_camino(self, camino_idx: list[int]) -> float:
-        """Suma los pesos de las aristas a lo largo de un camino ya calculado."""
-        total = 0.0
-        # Recorremos pares consecutivos: (a0,a1), (a1,a2), ...
-        for a, b in zip(camino_idx, camino_idx[1:]):
-            # Buscamos el peso de la arista a -> b en la adyacencia de a.
-            for vecino, peso in self._adyacencia[a]:
-                if vecino == b:
-                    total += peso
-                    break
-        return total
+    def _buscar_arista(self, a: int, b: int) -> Arista | None:
+        """Devuelve la Arista a -> b, o None si no existe.
+
+        COMPLEJIDAD: O(grado de salida de a).
+        """
+        for arista in self._adyacencia[a]:
+            if arista.vecino == b:
+                return arista
+        return None
 
 
 # ===========================================================================
 # PRUEBA RÁPIDA (se ejecuta con: python algoritmos.py)
 # ===========================================================================
-# Crea un grafo diminuto para ver la diferencia entre BFS y Dijkstra.
+# Crea un grafo diminuto para ver la diferencia entre los tres algoritmos.
 if __name__ == "__main__":
     g = GrafoVuelos()
     for codigo in ("A", "B", "C", "D"):
@@ -450,13 +726,27 @@ if __name__ == "__main__":
 
     # A -> B -> D: 2 tramos pero 11 km (largo).
     # A -> C -> D: 2 tramos pero 4 km (corto).
-    g.agregar_arista("A", "B", 10.0)
-    g.agregar_arista("B", "D", 1.0)
-    g.agregar_arista("A", "C", 2.0)
-    g.agregar_arista("C", "D", 2.0)
+    g.agregar_arista("A", "B", 10.0, "Aerolínea Uno", "A320")
+    g.agregar_arista("B", "D", 1.0, "Aerolínea Dos", "B737")
+    g.agregar_arista("A", "C", 2.0, "Aerolínea Uno", "A320")
+    g.agregar_arista("C", "D", 2.0, "Aerolínea Tres", "CR2")
 
     bfs = g.bfs_min_escalas("A", "D")
     dijkstra = g.dijkstra_min_distancia("A", "D")
+    bellman = g.bellman_ford_min_distancia("A", "D")
 
-    print("BFS      :", bfs.a_diccionario())
-    print("Dijkstra :", dijkstra.a_diccionario())
+    for resultado in (bfs, dijkstra, bellman):
+        datos = resultado.a_diccionario()
+        print(
+            f"{datos['algoritmo']:13} ruta={' -> '.join(datos['camino']):15} "
+            f"km={datos['distancia_total_km']:6.1f}  "
+            f"min={datos['tiempo_total_min']:5.0f}  "
+            f"usd={datos['costo_total_usd']:6.2f}  "
+            f"visitados={datos['visitados']:3d}  pasadas={datos['pasadas']}"
+        )
+
+    # Dijkstra y Bellman-Ford deben coincidir: mismo problema, mismo óptimo.
+    print()
+    print("¿Dijkstra y Bellman-Ford coinciden?",
+          dijkstra.camino == bellman.camino
+          and abs(dijkstra.distancia_total_km - bellman.distancia_total_km) < 1e-9)

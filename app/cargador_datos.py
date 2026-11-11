@@ -4,11 +4,13 @@ cargador_datos.py -- Lee los archivos .dat de OpenFlights y arma el grafo.
 ===========================================================================
 MAPA DE ESTE ARCHIVO
 ===========================================================================
-Este archivo tiene 1 solo trabajo: convertir dos archivos de texto
-(airports.dat y routes.dat) en objetos que el resto del proyecto entiende.
+Este archivo tiene 1 solo trabajo: convertir tres archivos de texto
+(airports.dat, routes.dat y airlines.dat) en objetos que el resto del
+proyecto entiende.
 
   airports.dat  ->  lista de aeropuertos con nombre, ciudad, país y coordenadas.
   routes.dat    ->  lista de vuelos (origen -> destino) entre aeropuertos.
+  airlines.dat  ->  nombre real de cada aerolínea, a partir de su ID numérico.
 
 Al final obtiene:
   1) Un GrafoVuelos (el que hicimos en algoritmos.py), ya cargado y ponderado.
@@ -45,9 +47,14 @@ DIR_DATOS = DIR_APP.parent / "data"
 
 ARCHIVO_AEROPUERTOS = "airports.dat"
 ARCHIVO_RUTAS = "routes.dat"
+ARCHIVO_AEROLINEAS = "airlines.dat"
 
 # Valor que OpenFlights usa para "dato vacío".
 VACIO = "\\N"
+
+# Texto por defecto cuando el dataset no trae el dato.
+AEROLINEA_DESCONOCIDA = "Desconocida"
+EQUIPO_DESCONOCIDO = "—"
 
 
 # ===========================================================================
@@ -171,12 +178,60 @@ def leer_aeropuertos(
 
 
 # ===========================================================================
+# LECTURA DE AEROLÍNEAS (para poner el nombre real en cada tramo)
+# ===========================================================================
+def leer_aerolineas(ruta: Path) -> dict[str, tuple[str, str]]:
+    """Lee airlines.dat y devuelve {id_aerolinea: (nombre, código IATA)}.
+
+    QUÉ HACE:
+        routes.dat solo trae el ID numérico de la aerolínea (columna 1).
+        airlines.dat traduce ese ID a un nombre legible ("American Airlines").
+
+    ¿POR QUÉ UNIR POR ID Y NO POR CÓDIGO IATA?
+        Porque el código IATA de una aerolínea puede venir vacío o repetido
+        en airlines.dat. El ID numérico es único y es el mismo en los dos
+        archivos, así que la unión es exacta.
+
+    FORMATO DE airlines.dat:
+        id, nombre, alias, IATA, ICAO, callsign, país, activa
+        Ej.: 24,"American Airlines",\\N,"AA","AAL","AMERICAN","United States","Y"
+
+    COMPLEJIDAD: O(A) donde A = cantidad de aerolíneas (una sola pasada).
+    """
+    catalogo: dict[str, tuple[str, str]] = {}
+
+    if not ruta.exists():
+        print(f"[cargador] Aviso: no se encontró {ruta.name}. Los tramos quedarán sin aerolínea.")
+        return catalogo
+
+    with open(ruta, encoding="utf-8") as archivo:
+        for fila in csv.reader(archivo):
+            # Necesitamos las 8 columnas del formato.
+            if len(fila) < 8:
+                continue
+
+            id_aerolinea = fila[0].strip()
+            nombre = fila[1].strip()
+            codigo_iata = fila[3].strip()
+
+            # Saltamos IDs inválidos y nombres vacíos o nulos.
+            if not id_aerolinea or nombre in ("", VACIO):
+                continue
+
+            catalogo[id_aerolinea] = (nombre, codigo_iata)
+
+    print(f"[cargador] Aerolíneas leídas: {len(catalogo)}")
+    return catalogo
+
+
+# ===========================================================================
 # LECTURA DE RUTAS Y CONSTRUCCIÓN DEL GRAFO
 # ===========================================================================
 def leer_rutas(
     ruta: Path,
     info: dict[str, InfoAeropuerto],
     id_a_iata: dict[str, str],
+    aerolineas: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[GrafoVuelos, dict[str, int]]:
     """Lee routes.dat y construye el grafo de vuelos ponderado.
 
@@ -210,20 +265,25 @@ def leer_rutas(
     validas = 0
     guardadas = 0
 
+    # Si no nos pasaron las aerolíneas, trabajamos sin nombres reales.
+    catalogo = aerolineas if aerolineas is not None else {}
+
     # Paso 3: recorrer routes.dat.
     with open(ruta, encoding="utf-8") as archivo:
         for fila in csv.reader(archivo):
             leidas += 1
 
-            # Necesitamos al menos 6 columnas.
-            if len(fila) < 6:
+            # Necesitamos al menos 9 columnas (la 8 es el equipo).
+            if len(fila) < 9:
                 continue
 
             # Columnas de routes.dat (índice):
             # 0=aerolínea, 1=id aerolínea, 2=IATA origen, 3=ID origen,
             # 4=IATA destino, 5=ID destino, 6=codeshare, 7=escalas, 8=equipo
+            id_aerolinea = fila[1]
             id_origen = fila[3]
             id_destino = fila[5]
+            equipo = fila[8].strip()
 
             # Paso 3b: traducir ID numérico -> IATA.
             origen = id_a_iata.get(id_origen)
@@ -245,8 +305,14 @@ def leer_rutas(
                 datos_destino.lat, datos_destino.lon,
             )
 
+            # Paso 3e-bis: nombre real de la aerolínea y equipo declarado.
+            nombre_aerolinea = catalogo.get(id_aerolinea, (AEROLINEA_DESCONOCIDA, ""))[0]
+            nombre_equipo = equipo if equipo else EQUIPO_DESCONOCIDO
+
             # Paso 3f y 3g: agregar al grafo. True = ruta nueva, False = duplicada.
-            if grafo.agregar_arista(origen, destino, km):
+            if grafo.agregar_arista(
+                origen, destino, km, nombre_aerolinea, nombre_equipo
+            ):
                 guardadas += 1
 
     # Paso 4: resumen.
@@ -270,9 +336,10 @@ def cargar_grafo(
     PSEUDOCÓDIGO:
         1. Usar la carpeta de datos indicada o la carpeta por defecto.
         2. Leer los aeropuertos.
-        3. Leer las rutas y armar el grafo.
-        4. Mostrar el resumen final (nodos, aristas).
-        5. Devolver grafo + info.
+        3. Leer las aerolíneas (para traducir el ID de cada ruta a un nombre).
+        4. Leer las rutas y armar el grafo, ya con aerolínea y equipo.
+        5. Mostrar el resumen final (nodos, aristas).
+        6. Devolver grafo + info.
 
     Esta es la función que llamará el servidor web UNA sola vez al arrancar.
     """
@@ -283,9 +350,14 @@ def cargar_grafo(
     info, id_a_iata = leer_aeropuertos(carpeta / ARCHIVO_AEROPUERTOS)
 
     # Paso 3.
-    grafo, contadores = leer_rutas(carpeta / ARCHIVO_RUTAS, info, id_a_iata)
+    aerolineas = leer_aerolineas(carpeta / ARCHIVO_AEROLINEAS)
 
     # Paso 4.
+    grafo, contadores = leer_rutas(
+        carpeta / ARCHIVO_RUTAS, info, id_a_iata, aerolineas
+    )
+
+    # Paso 5.
     con_salidas = sum(1 for iata in info if grafo.grado_salida(iata) > 0)
     print(
         f"[cargador] Grafo listo -> {grafo.num_nodos} aeropuertos, "
