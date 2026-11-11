@@ -102,16 +102,21 @@ def test_tarjetas_muestran_tiempo_y_precio(page):
 
     tarjeta_dijkstra = page.locator(".tarjeta.dijkstra")
     expect(tarjeta_dijkstra).to_contain_text("8 h 06 min")
-    expect(tarjeta_dijkstra).to_contain_text("$470.25")
+    expect(tarjeta_dijkstra).to_contain_text("$ 470.25")
 
     # BFS llega por Miami: más largo y más caro.
     tarjeta_bfs = page.locator(".tarjeta.bfs")
     expect(tarjeta_bfs).to_contain_text("14 h 48 min")
-    expect(tarjeta_bfs).to_contain_text("$1,048.84")
+    expect(tarjeta_bfs).to_contain_text("$ 1,048.84")
 
 
 def test_tooltip_del_tramo_muestra_aerolinea_y_precio(page):
     buscar(page, "LIM", "BSB")
+
+    # El mapa ajusta el encuadre dos veces (una al dibujar y otra en el
+    # siguiente frame). Si medimos el punto antes de que termine, el mouse
+    # cae fuera de la línea.
+    page.wait_for_timeout(700)
 
     # Posición en píxeles del punto medio del tramo LIM->GRU, calculada con
     # la propia API de Leaflet para no depender de coordenadas a ojo.
@@ -130,7 +135,7 @@ def test_tooltip_del_tramo_muestra_aerolinea_y_precio(page):
     expect(tooltip.first).to_contain_text("LIM → GRU")
     expect(tooltip.first).to_contain_text("Avianca")
     expect(tooltip.first).to_contain_text("3,474.66 km")
-    expect(tooltip.first).to_contain_text("$346.68")
+    expect(tooltip.first).to_contain_text("$ 346.68")
 
 
 # ---------------------------------------------------------------------------

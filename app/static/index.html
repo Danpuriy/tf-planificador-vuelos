@@ -1,74 +1,281 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Planificador de Vuelos · AeroRutas</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Planificador de Vuelos · AeroRutas</title>
 
-  <!-- Leaflet: la librería que dibuja el mapa interactivo -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <!-- Nuestros estilos. El ?v= cambia cuando cambia el diseño: obliga al
-       navegador a bajar la versión nueva en vez de usar la cacheada. -->
-  <link rel="stylesheet" href="/static/styles.css?v=3" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="/static/styles.css?v=8" />
 </head>
 <body>
 
-  <!-- Barra superior: marca y aviso de que es un trabajo académico -->
-  <header class="topbar">
-    <div class="marca">
-      <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg>
+
+<!-- ============================ TOPBAR ============================ -->
+<header class="topbar">
+  <div class="marca">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8-5V3.2a1.5 1.5 0 0 0-3 0V8.5l-8 5v2l8-2.5V18l-2.5 1.8V21l4-1 4 1v-1.2L13.5 18v-5z"/></svg>
+    </div>
+    <div>
+      <div class="texto">Aero<span>Rutas</span></div>
+      <small>Planificador de vuelos</small>
+    </div>
+  </div>
+
+  <nav class="nav-derecha">
+    <span>Rutas por distancia</span>
+    <span>Rutas por escalas</span>
+    <span class="aviso-mockup">Complejidad Algorítmica</span>
+  </nav>
+</header>
+
+<!-- ============================ PANTALLA 1 · INICIO ============================ -->
+<section id="inicio" class="pantalla activa">
+
+  <div class="hero">
+    <h1>¿A dónde querés <em>volar</em>?</h1>
+    <p>Compará rutas por distancia, tiempo y costo sobre la red aérea mundial real.</p>
+  </div>
+
+  <div class="tarjeta-busqueda">
+
+    <!-- Tipo de viaje -->
+    <div class="tipos-viaje" id="tipos-viaje">
+      <button class="tipo activo" data-tipo="ida-vuelta">Ida y vuelta</button>
+      <button class="tipo" data-tipo="solo-ida">Solo ida</button>
+      <button class="tipo" data-tipo="multidestino">Multidestino</button>
+    </div>
+
+    <!-- Campos -->
+    <div class="fila-campos" id="fila-campos">
+
+      <div class="campo" id="campo-origen">
+        <label>Desde</label>
+        <div class="valor-fila">
+          <input id="origen" class="entrada-iata" type="text"
+                 placeholder="LIM" autocomplete="off" />
+          <span class="lugar" id="origen-lugar"></span>
+        </div>
+        <ul id="lista-origen" class="autocompletado"></ul>
       </div>
-      <div class="texto">
-        Aero<span>Rutas</span>
-        <small>Planificador de Vuelos</small>
+
+      <button class="boton-intercambiar" id="intercambiar" title="Intercambiar origen y destino">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 4v13M7 17l-3-3M7 17l3-3M17 20V7M17 7l3 3M17 7l-3 3"/>
+        </svg>
+      </button>
+
+      <div class="campo" id="campo-destino">
+        <label>Hacia</label>
+        <div class="valor-fila">
+          <input id="destino" class="entrada-iata" type="text"
+                 placeholder="BSB" autocomplete="off" />
+          <span class="lugar" id="destino-lugar"></span>
+        </div>
+        <ul id="lista-destino" class="autocompletado"></ul>
+      </div>
+
+      <div class="campo campo-fecha">
+        <label>Ida</label>
+        <div class="fecha" id="fecha-ida">—</div>
+      </div>
+
+      <div class="campo campo-fecha campo-vuelta">
+        <label>Vuelta</label>
+        <div class="fecha" id="fecha-vuelta">—</div>
+      </div>
+
+      <div class="campo campo-pasajeros" id="campo-pasajeros">
+        <label>Pasajeros y cabina</label>
+        <div class="valor-fila">
+          <span class="fecha" id="resumen-pasajeros">1 adulto · Economía</span>
+        </div>
+
+        <!-- Popover -->
+        <div class="popover" id="popover-pasajeros">
+          <div class="contador">
+            <div>
+              <div class="nombre">Adultos</div>
+              <div class="nota">12 años o más</div>
+            </div>
+            <div class="stepper">
+              <button data-paso="adultos" data-delta="-1" disabled>−</button>
+              <span class="n" id="n-adultos">1</span>
+              <button data-paso="adultos" data-delta="1">+</button>
+            </div>
+          </div>
+
+          <div class="contador">
+            <div>
+              <div class="nombre">Niños</div>
+              <div class="nota">2 a 11 años</div>
+            </div>
+            <div class="stepper">
+              <button data-paso="ninos" data-delta="-1" disabled>−</button>
+              <span class="n" id="n-ninos">0</span>
+              <button data-paso="ninos" data-delta="1">+</button>
+            </div>
+          </div>
+
+          <div class="contador">
+            <div>
+              <div class="nombre">Bebés</div>
+              <div class="nota">Menores de 2 años</div>
+            </div>
+            <div class="stepper">
+              <button data-paso="bebes" data-delta="-1" disabled>−</button>
+              <span class="n" id="n-bebes">0</span>
+              <button data-paso="bebes" data-delta="1">+</button>
+            </div>
+          </div>
+
+          <div class="cabinas">
+            <div class="titulo">Cabina</div>
+            <label class="cabina"><input type="radio" name="cabina" value="Economía" checked /> Economía</label>
+            <label class="cabina"><input type="radio" name="cabina" value="Premium" /> Premium economy</label>
+            <label class="cabina"><input type="radio" name="cabina" value="Ejecutiva" /> Ejecutiva</label>
+            <label class="cabina"><input type="radio" name="cabina" value="Primera" /> Primera</label>
+          </div>
+
+          <button class="listo" id="cerrar-popover">Listo</button>
+        </div>
+      </div>
+
+    </div>
+
+    <button class="boton-buscar" id="buscar">Buscar vuelos</button>
+    <div id="mensaje" class="mensaje"></div>
+  </div>
+
+  <!-- Cómo elige cada algoritmo -->
+  <div class="populares">
+    <h2>Cómo elige cada algoritmo</h2>
+    <div class="grid-populares">
+      <div class="destino g1">
+        <span class="iata-badge">BFS</span>
+        <div>
+          <div class="nombre">Menos escalas</div>
+          <div class="desde">Recorre el grafo por niveles. La primera vez que llega al destino usó la menor cantidad de tramos posibles.</div>
+        </div>
+      </div>
+      <div class="destino g2">
+        <span class="iata-badge">DIJ</span>
+        <div>
+          <div class="nombre">Menos kilómetros</div>
+          <div class="desde">Siempre expande el aeropuerto más cercano al origen, así que el primer camino que llega al destino es el más corto.</div>
+        </div>
       </div>
     </div>
-    <span class="aviso-mockup">Complejidad Algorítmica</span>
-  </header>
+  </div>
 
-  <div class="contenedor">
+</section>
 
-    <!-- Panel lateral: buscadores y resultados -->
-    <aside class="panel">
+<!-- ============================ PANTALLA 2 · RESULTADOS ============================ -->
+<section id="resultados" class="pantalla">
 
-      <section class="buscador-tarjeta">
-        <!-- Buscador de origen -->
-        <div class="campo-busqueda">
-          <label for="origen">Desde</label>
-          <div class="campo">
-            <input id="origen" type="text" placeholder="Código o ciudad · ej. LIM" autocomplete="off" />
-            <ul id="lista-origen" class="autocompletado"></ul>
-          </div>
-        </div>
+  <div class="barra-resumen">
+    <div class="resumen-ruta">
+      <span id="res-origen">LIM</span>
+      <span class="flecha">→</span>
+      <span id="res-destino">BSB</span>
+    </div>
 
-        <!-- Buscador de destino -->
-        <div class="campo-busqueda">
-          <label for="destino">Hacia</label>
-          <div class="campo">
-            <input id="destino" type="text" placeholder="Código o ciudad · ej. BSB" autocomplete="off" />
-            <ul id="lista-destino" class="autocompletado"></ul>
-          </div>
-        </div>
+    <div class="resumen-detalle">
+      <span id="res-fecha">—</span>
+      <span class="sep">·</span>
+      <span id="res-pasajeros">1 adulto · Economía</span>
+    </div>
 
-        <button id="buscar" class="boton">Buscar ruta</button>
-      </section>
+    <button class="boton-modificar" id="boton-modificar">Modificar búsqueda</button>
+  </div>
 
-      <!-- Mensajes de error / estado -->
-      <div id="mensaje" class="mensaje"></div>
+  <div class="contenido">
 
-      <!-- Tarjetas con los resultados -->
-      <div id="resultados" class="resultados"></div>
+    <aside class="columna-resultados">
+
+      <div class="titulo-resultados">
+        <h2>Elegí tu vuelo</h2>
+        <span>2 opciones encontradas</span>
+      </div>
+
+      <div class="orden">
+        <button class="activo">Mejor</button>
+        <button>Más barato</button>
+        <button>Más rápido</button>
+        <button>Menos escalas</button>
+      </div>
+
+      <div id="lista-vuelos"></div>
+      <div id="panel-comparacion"></div>
+      <div id="panel-validacion"></div>
 
     </aside>
 
-    <!-- Mapa -->
-    <main id="mapa"></main>
-
+    <div id="mapa"></div>
   </div>
 
-  <!-- Leaflet y nuestra lógica -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/app.js?v=3"></script>
+  <!-- Skeleton de carga -->
+  <div class="skeleton">
+    <div class="sk"></div>
+    <div class="sk"></div>
+    <div class="sk"></div>
+  </div>
+
+</section>
+
+<!-- ============================ BOARDING PASS ============================ -->
+<div class="velo" id="velo">
+  <button class="bp-cerrar" id="cerrar">×</button>
+
+  <div class="boarding-pass">
+    <div class="bp-cuerpo">
+      <div class="bp-cabecera">
+        <div class="badge-aerolinea la" id="bp-badge">LA</div>
+        <div>
+          <div class="bp-aerolinea" id="bp-aerolinea">LATAM Airlines</div>
+          <div class="bp-vuelo" id="bp-vuelo">LA2417 · Airbus A320</div>
+        </div>
+        <span class="bp-clase">Económica</span>
+      </div>
+
+      <div class="bp-ruta">
+        <div class="bp-punto">
+          <div class="hora">08:35</div>
+          <div class="iata">LIM</div>
+          <div class="ciudad">Lima, Perú</div>
+        </div>
+
+        <div class="bp-trayecto">
+          <div class="linea"></div>
+          <svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8-5V3.2a1.5 1.5 0 0 0-3 0V8.5l-8 5v2l8-2.5V18l-2.5 1.8V21l4-1 4 1v-1.2L13.5 18v-5z"/></svg>
+        </div>
+
+        <div class="bp-punto derecha">
+          <div class="hora">18:41</div>
+          <div class="iata">BSB</div>
+          <div class="ciudad">Brasilia, Brasil</div>
+        </div>
+      </div>
+
+      <div class="bp-grid">
+        <div><span>Tramos</span><strong>—</strong></div>
+        <div><span>Escalas</span><strong>—</strong></div>
+        <div><span>Duración</span><strong>—</strong></div>
+        <div><span>Distancia</span><strong>—</strong></div>
+      </div>
+    </div>
+
+    <div class="bp-talon">
+      <div class="bp-barcode"></div>
+      <div class="bp-codigo">LA2417 · LIMGRU</div>
+      <div class="bp-precio-final">$ 430<small>Total estimado</small></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ LEAFLET ============================ -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/app.js?v=8"></script>
 </body>
 </html>

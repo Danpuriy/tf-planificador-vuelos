@@ -122,7 +122,7 @@ def test_pagina_principal_sirve_html(cliente):
 def test_estaticos_se_sirven(cliente):
     for archivo in ("app.js", "styles.css"):
         assert cliente.get(f"/static/{archivo}").status_code == 200
-    assert "tarjetaComparacion" in cliente.get("/static/app.js").text
+    assert "renderizarComparacion" in cliente.get("/static/app.js").text
 
 
 # ===========================================================================
