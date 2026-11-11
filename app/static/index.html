@@ -7,8 +7,9 @@
 
   <!-- Leaflet: la librería que dibuja el mapa interactivo -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <!-- Nuestros estilos -->
-  <link rel="stylesheet" href="/static/styles.css" />
+  <!-- Nuestros estilos. El ?v= cambia cuando cambia el diseño: obliga al
+       navegador a bajar la versión nueva en vez de usar la cacheada. -->
+  <link rel="stylesheet" href="/static/styles.css?v=3" />
 </head>
 <body>
 
@@ -68,6 +69,6 @@
 
   <!-- Leaflet y nuestra lógica -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>
