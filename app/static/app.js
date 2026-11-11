@@ -50,15 +50,50 @@ function configurarBuscador(idInput, idLista, alElegir) {
   const input = document.getElementById(idInput);
   const lista = document.getElementById(idLista);
   let temporizador = null;
+  let peticion = 0;      // token para descartar respuestas que llegan tarde
+  let indiceActivo = -1; // sugerencia resaltada con el teclado
+
+  const opciones = () => Array.from(lista.querySelectorAll("li"));
+
+  function cerrar() {
+    ocultarLista(lista);
+    input.setAttribute("aria-expanded", "false");
+    indiceActivo = -1;
+  }
+
+  function resaltar(indice) {
+    const items = opciones();
+    if (!items.length) return;
+    indiceActivo = (indice + items.length) % items.length;
+    items.forEach((item, i) => {
+      const activo = i === indiceActivo;
+      item.classList.toggle("activo", activo);
+      item.setAttribute("aria-selected", String(activo));
+    });
+    items[indiceActivo].scrollIntoView({ block: "nearest" });
+  }
+
+  function elegir(a) {
+    input.value = a.iata;
+    peticion++;          // invalida cualquier búsqueda todavía en vuelo
+    cerrar();
+    alElegir(a);
+  }
 
   input.addEventListener("input", () => {
     clearTimeout(temporizador);
+    indiceActivo = -1;
     const texto = input.value.trim();
 
     if (texto.length < 1) {
-      ocultarLista(lista);
+      cerrar();
       return;
     }
+
+    // Cada búsqueda lleva un número. Si al volver ya hay una más nueva, esta
+    // respuesta se descarta: si no, una petición lenta puede pisar el
+    // resultado de una posterior y la lista queda mostrando lo que no es.
+    const miPeticion = ++peticion;
 
     temporizador = setTimeout(async () => {
       try {
@@ -66,17 +101,41 @@ function configurarBuscador(idInput, idLista, alElegir) {
           `/api/aeropuertos?q=${encodeURIComponent(texto)}&limite=12`
         );
         const aeropuertos = await respuesta.json();
-        renderizarSugerencias(lista, aeropuertos, input, alElegir);
+        if (miPeticion !== peticion) return;
+
+        renderizarSugerencias(lista, aeropuertos, elegir);
+        input.setAttribute("aria-expanded", String(aeropuertos.length > 0));
       } catch (error) {
         console.error("Error buscando aeropuertos:", error);
       }
     }, 200);
   });
 
-  input.addEventListener("blur", () => setTimeout(() => ocultarLista(lista), 150));
+  input.addEventListener("keydown", (evento) => {
+    const abierta = lista.classList.contains("visible");
+    const items = opciones();
+
+    if (evento.key === "ArrowDown" && abierta) {
+      evento.preventDefault();
+      evento.stopImmediatePropagation();
+      resaltar(indiceActivo + 1);
+    } else if (evento.key === "ArrowUp" && abierta) {
+      evento.preventDefault();
+      evento.stopImmediatePropagation();
+      resaltar(indiceActivo <= 0 ? items.length - 1 : indiceActivo - 1);
+    } else if (evento.key === "Enter" && abierta && indiceActivo >= 0) {
+      evento.preventDefault();
+      evento.stopImmediatePropagation();
+      elegir(items[indiceActivo].aeropuerto);
+    } else if (evento.key === "Escape") {
+      cerrar();
+    }
+  });
+
+  input.addEventListener("blur", () => setTimeout(cerrar, 150));
 }
 
-function renderizarSugerencias(lista, aeropuertos, input, alElegir) {
+function renderizarSugerencias(lista, aeropuertos, elegir) {
   lista.innerHTML = "";
 
   if (!aeropuertos.length) {
@@ -86,13 +145,23 @@ function renderizarSugerencias(lista, aeropuertos, input, alElegir) {
 
   aeropuertos.forEach((a) => {
     const item = document.createElement("li");
-    item.innerHTML = `<strong>${a.iata}</strong> · ${a.ciudad}<small>${a.nombre}</small>`;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", "false");
+    item.aeropuerto = a;
+
+    // textContent y no innerHTML: los nombres del dataset son texto, no HTML.
+    // Hay aeropuertos con "&" en el nombre ("Bill & Hillary Clinton...").
+    const codigo = document.createElement("strong");
+    codigo.textContent = a.iata;
+    item.appendChild(codigo);
+    item.appendChild(document.createTextNode(` · ${a.ciudad}`));
+    const detalle = document.createElement("small");
+    detalle.textContent = a.nombre;
+    item.appendChild(detalle);
 
     item.addEventListener("mousedown", (evento) => {
       evento.preventDefault();
-      input.value = a.iata;
-      ocultarLista(lista);
-      alElegir(a);
+      elegir(a);
     });
 
     lista.appendChild(item);
@@ -317,6 +386,28 @@ function precioConPasajeros(usd) {
   return usd * Math.max(pagantes, 1);
 }
 
+/** Aclara si el monto mostrado es de una persona o el total del grupo. */
+function notaPrecio() {
+  const pagantes = pasajeros.adultos + pasajeros.ninos;
+  return pagantes > 1 ? `total ${pagantes} pasajeros` : "estimado por pasajero";
+}
+
+/**
+ * Cuánto trabajo hizo cada algoritmo, con la unidad que corresponde.
+ *
+ * BFS y Dijkstra cuentan NODOS visitados. Bellman-Ford no: barre todas las
+ * aristas en cada pasada, así que su contador son RELAJACIONES (las veces que
+ * mejoró una distancia). Mezclarlos bajo una sola etiqueta "visitados" sería
+ * comparar cosas distintas, y el número de Bellman-Ford es el mismo para
+ * cualquier destino porque no corta al llegar.
+ */
+function textoTrabajo(fila) {
+  if (fila.algoritmo === "Bellman-Ford") {
+    return `${fila.visitados.toLocaleString("es-PE")} relaj. · ${fila.pasadas} pasadas`;
+  }
+  return `${fila.visitados.toLocaleString("es-PE")} nodos`;
+}
+
 /** "Avianca - Aerovias Nacionales de Colombia" -> "Avianca". */
 function nombreCorto(aerolinea) {
   if (!aerolinea) return "Aerolínea";
@@ -451,7 +542,7 @@ function tarjetaHTML(resultado, clave, etiqueta, clasesEtiqueta) {
       </div>
       <div class="precio">
         <span class="monto">${formatearPrecio(precioConPasajeros(resultado.costo_total_usd))}</span>
-        <span class="nota">estimado por pasajero</span>
+        <span class="nota">${notaPrecio()}</span>
       </div>
       <button class="boton-ver" data-ver="${clave}">Ver</button>
     </div>
@@ -684,6 +775,31 @@ async function ejecutarValidacion() {
       return;
     }
 
+    // ¿COINCIDEN DE VERDAD?
+    //   Antes el panel decía "Coinciden" sin mirar los resultados. Eso es
+    //   justo lo que este panel debería demostrar, así que se compara el
+    //   camino y la distancia. Con pesos no negativos los dos tienen que
+    //   coincidir; si no coinciden, hay un bug y la UI tiene que decirlo.
+    const comparables = datos.comparacion.every((fila) => fila.encontrada);
+    const { dijkstra, bellman_ford: bellman } = datos;
+    const coinciden =
+      comparables &&
+      bellman.camino.join(">") === dijkstra.camino.join(">") &&
+      Math.abs(bellman.distancia_total_km - dijkstra.distancia_total_km) < 0.01;
+
+    let veredicto;
+    if (!comparables) {
+      veredicto = "No hay ruta entre esos dos aeropuertos, así que no hay nada que validar.";
+    } else if (coinciden) {
+      veredicto =
+        "Bellman-Ford encontró la misma ruta y la misma distancia que Dijkstra. " +
+        "Hizo muchas más relajaciones y necesitó varias pasadas: es el precio de ser O(V·E).";
+    } else {
+      veredicto =
+        "Bellman-Ford y Dijkstra NO coinciden. Con pesos no negativos los dos deben " +
+        "dar la misma ruta: esto sería un error de implementación, no una diferencia de criterio.";
+    }
+
     const filas = datos.comparacion
       .map((fila) => {
         const color =
@@ -693,8 +809,7 @@ async function ejecutarValidacion() {
             <span class="ruta-mini">${fila.camino.join(" → ")}</span>
           </td>
           <td>${formatearKm(fila.distancia_total_km)}</td>
-          <td>${fila.visitados.toLocaleString("es-PE")}</td>
-          <td class="${fila.pasadas ? "" : "no"}">${fila.pasadas || "—"}</td>
+          <td>${textoTrabajo(fila)}</td>
           <td>${fila.tiempo_ms}</td>
         </tr>`;
       })
@@ -705,19 +820,17 @@ async function ejecutarValidacion() {
         <div class="validacion-cabecera">
           <span class="etiqueta-opcion violeta">Validación</span>
           <h3>Tres algoritmos, un solo grafo</h3>
-          <span class="marca-ok">Coinciden</span>
+          <span class="${coinciden ? "marca-ok" : "marca-no"}">${
+            comparables ? (coinciden ? "Coinciden" : "No coinciden") : "Sin ruta"
+          }</span>
         </div>
-        <p>
-          Bellman-Ford encontró la misma ruta y la misma distancia que Dijkstra.
-          Visitó muchos más nodos y necesitó varias pasadas: es el precio de ser O(V·E).
-        </p>
+        <p>${veredicto}</p>
         <table class="tabla-validacion">
           <thead>
             <tr>
               <th>Algoritmo</th>
               <th>km</th>
-              <th>Visitados</th>
-              <th>Pasadas</th>
+              <th>Trabajo</th>
               <th>ms</th>
             </tr>
           </thead>
@@ -975,7 +1088,11 @@ function pintarPasajeros() {
   });
 
   // Si ya hay resultados en pantalla, el precio se recalcula al instante.
-  if (datosActuales) renderizarVuelos();
+  // Hay que refrescar las dos cosas: las tarjetas y el total de ida y vuelta.
+  if (datosActuales) {
+    renderizarVuelos();
+    pintarTotales();
+  }
 }
 
 /* -------------------- ARRANQUE -------------------- */

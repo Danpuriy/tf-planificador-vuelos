@@ -6,7 +6,7 @@
 <title>Planificador de Vuelos · AeroRutas</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="/static/styles.css?v=11" />
+<link rel="stylesheet" href="/static/styles.css?v=12" />
 </head>
 <body>
 
@@ -50,13 +50,16 @@
     <div class="fila-campos" id="fila-campos">
 
       <div class="campo" id="campo-origen">
-        <label>Desde</label>
+        <label for="origen">Desde</label>
         <div class="valor-fila">
           <input id="origen" class="entrada-iata" type="text"
-                 placeholder="LIM" autocomplete="off" />
+                 placeholder="LIM" autocomplete="off"
+                 role="combobox" aria-autocomplete="list"
+                 aria-expanded="false" aria-controls="lista-origen" />
           <span class="lugar" id="origen-lugar"></span>
         </div>
-        <ul id="lista-origen" class="autocompletado"></ul>
+        <ul id="lista-origen" class="autocompletado" role="listbox"
+            aria-label="Sugerencias de aeropuerto de origen"></ul>
       </div>
 
       <button class="boton-intercambiar" id="intercambiar" title="Intercambiar origen y destino">
@@ -66,13 +69,16 @@
       </button>
 
       <div class="campo" id="campo-destino">
-        <label>Hacia</label>
+        <label for="destino">Hacia</label>
         <div class="valor-fila">
           <input id="destino" class="entrada-iata" type="text"
-                 placeholder="BSB" autocomplete="off" />
+                 placeholder="BSB" autocomplete="off"
+                 role="combobox" aria-autocomplete="list"
+                 aria-expanded="false" aria-controls="lista-destino" />
           <span class="lugar" id="destino-lugar"></span>
         </div>
-        <ul id="lista-destino" class="autocompletado"></ul>
+        <ul id="lista-destino" class="autocompletado" role="listbox"
+            aria-label="Sugerencias de aeropuerto de destino"></ul>
       </div>
 
       <div class="campo campo-fecha">
@@ -281,6 +287,6 @@
 
 <!-- ============================ LEAFLET ============================ -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>

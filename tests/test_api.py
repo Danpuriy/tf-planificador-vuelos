@@ -64,6 +64,29 @@ def test_busqueda_por_ciudad(cliente):
     assert any(a["ciudad"].lower() == "lima" for a in r.json())
 
 
+def test_busqueda_rechaza_limite_cero(cliente):
+    """Sin cota, limite=0 devolvería una lista vacía y limite=-5 un slicing raro."""
+    r = cliente.get("/api/aeropuertos", params={"q": "a", "limite": 0})
+    assert r.status_code == 422
+
+
+def test_busqueda_rechaza_limite_negativo(cliente):
+    r = cliente.get("/api/aeropuertos", params={"q": "a", "limite": -5})
+    assert r.status_code == 422
+
+
+def test_busqueda_rechaza_limite_desmedido(cliente):
+    """Mas de 50 sugerencias no aportan nada y alientan pedidos abusivos."""
+    r = cliente.get("/api/aeropuertos", params={"q": "a", "limite": 99999})
+    assert r.status_code == 422
+
+
+def test_busqueda_acepta_el_maximo_permitido(cliente):
+    r = cliente.get("/api/aeropuertos", params={"q": "a", "limite": 50})
+    assert r.status_code == 200
+    assert len(r.json()) <= 50
+
+
 # ---------------------------------------------------------------------------
 # Cálculo de rutas
 # ---------------------------------------------------------------------------

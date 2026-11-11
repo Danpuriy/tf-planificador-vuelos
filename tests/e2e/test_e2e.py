@@ -7,6 +7,7 @@ las líneas dibujadas en el mapa.
 No modifican el código de la app: solo la usan como lo haría una persona.
 """
 
+import json
 import re
 
 import pytest
@@ -319,3 +320,89 @@ def test_sin_desborde_horizontal_en_mobile(page):
 
     ancho = page.evaluate("() => document.documentElement.scrollWidth")
     assert ancho <= 390, f"la página desborda a {ancho}px"
+
+
+# ---------------------------------------------------------------------------
+# Honestidad de lo que muestra la interfaz
+# ---------------------------------------------------------------------------
+def test_validacion_avisa_cuando_los_algoritmos_no_coinciden(page):
+    """Si Bellman-Ford y Dijkstra difieren, el panel NO puede decir "Coinciden"."""
+
+    def falsear_bellman(route):
+        datos = route.fetch().json()
+        datos["bellman_ford"]["camino"] = ["LIM", "MIA", "BSB"]
+        datos["bellman_ford"]["distancia_total_km"] = 10026.55
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(datos))
+
+    page.route("**/api/ruta*validar=true*", falsear_bellman)
+
+    buscar(page, "LIM", "BSB")
+    page.click("#boton-validar")
+
+    expect(page.locator(".marca-no")).to_contain_text("No coinciden", timeout=25000)
+    expect(page.locator(".marca-ok")).to_have_count(0)
+
+
+def test_tabla_validacion_no_mezcla_relajaciones_con_nodos(page):
+    """Bellman-Ford cuenta relajaciones, no nodos: la columna tiene que decirlo."""
+    buscar(page, "LIM", "BSB")
+    page.click("#boton-validar")
+    expect(page.locator(".tabla-validacion")).to_be_visible(timeout=25000)
+
+    tabla = page.locator(".tabla-validacion")
+    expect(tabla).to_contain_text("nodos")
+    expect(tabla).to_contain_text("relaj.")
+    expect(tabla).to_contain_text("pasadas")
+
+
+# ---------------------------------------------------------------------------
+# Precio y pasajeros
+# ---------------------------------------------------------------------------
+def test_precio_de_tarjeta_dice_por_pasajero_con_uno_solo(page):
+    buscar(page, "LIM", "BSB")
+    expect(page.locator(".tarjeta.dijkstra .precio .nota")).to_have_text("estimado por pasajero")
+
+
+def test_precio_de_tarjeta_pasa_a_total_con_varios_pasajeros(page):
+    """Con 2 adultos el monto se duplica: la nota no puede seguir diciendo "por pasajero"."""
+    page.click("#resumen-pasajeros")
+    page.click('[data-paso="adultos"][data-delta="1"]')
+    page.click("#cerrar-popover")
+
+    buscar(page, "LIM", "BSB")
+
+    expect(page.locator(".tarjeta.dijkstra .precio .nota")).to_have_text("total 2 pasajeros")
+    expect(page.locator(".tarjeta.dijkstra .precio .monto")).to_have_text("$ 940.50")
+
+
+def test_total_de_ida_y_vuelta_refleja_los_pasajeros(page):
+    page.click('[data-tipo="ida-vuelta"]')
+    page.click("#resumen-pasajeros")
+    page.click('[data-paso="adultos"][data-delta="1"]')
+    page.click("#cerrar-popover")
+
+    buscar(page, "LIM", "BSB")
+
+    total = page.locator("#res-total")
+    expect(total).to_be_visible()
+    # 952.20 por persona, dos personas.
+    expect(total).to_contain_text("$ 1,904.40")
+
+
+# ---------------------------------------------------------------------------
+# Teclado
+# ---------------------------------------------------------------------------
+def test_autocompletado_se_elige_con_el_teclado(page):
+    page.fill("#origen", "LIM")
+    lista = page.locator("#lista-origen.visible")
+    expect(lista).to_be_visible(timeout=5000)
+
+    page.press("#origen", "ArrowDown")
+    expect(lista.locator("li").first).to_have_class(re.compile(r"\bactivo\b"))
+
+    page.press("#origen", "Enter")
+
+    assert page.input_value("#origen") == "LIM"
+    expect(page.locator("#lista-origen.visible")).to_have_count(0)
+    # Enter eligió la sugerencia: no disparó la búsqueda.
+    expect(page.locator("#inicio.activa")).to_be_visible()

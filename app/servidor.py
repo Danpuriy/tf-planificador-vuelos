@@ -29,7 +29,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -171,7 +171,10 @@ def _entrada_comparacion(resultado: ResultadoRuta, tiempo_ms: float) -> dict:
 # ENDPOINT: autocompletado de aeropuertos
 # ===========================================================================
 @app.get("/api/aeropuertos")
-def buscar_aeropuertos(q: str = "", limite: int = 12) -> list[dict]:
+def buscar_aeropuertos(
+    q: str = "",
+    limite: int = Query(12, ge=1, le=50, description="Máximo de sugerencias (1-50)."),
+) -> list[dict]:
     """Busca aeropuertos por código IATA, ciudad, nombre o país.
 
     PSEUDOCÓDIGO:
@@ -228,9 +231,9 @@ def calcular_ruta(origen: str, destino: str, validar: bool = False):
     """Calcula la ruta con BFS y Dijkstra, y opcionalmente valida con Bellman-Ford.
 
     PARÁMETRO `validar`:
-        False (por defecto) -> BFS + Dijkstra. Camino rápido (~0.5 ms).
+        False (por defecto) -> BFS + Dijkstra. Camino rápido (~4 ms medidos).
         True                -> agrega Bellman-Ford y la tabla de comparación.
-                               Cuesta ~16 ms extra porque Bellman-Ford es O(V·E).
+                               Cuesta ~35 ms extra porque Bellman-Ford es O(V·E).
 
     PSEUDOCÓDIGO:
         1. Normalizar origen y destino a mayúsculas.
@@ -271,7 +274,7 @@ def calcular_ruta(origen: str, destino: str, validar: bool = False):
     resultado_dijkstra = GRAFO.dijkstra_min_distancia(o, d)
     tiempo_dijkstra = (time.perf_counter() - inicio_dijkstra) * 1000
 
-    # Paso 5: respuesta base. Es el camino rápido: dos algoritmos, ~0.5 ms.
+    # Paso 5: respuesta base. Es el camino rápido: dos algoritmos, ~4 ms.
     respuesta = {
         "origen": _info_publica(o),
         "destino": _info_publica(d),
@@ -282,9 +285,9 @@ def calcular_ruta(origen: str, destino: str, validar: bool = False):
     # Paso 6: validación opcional con Bellman-Ford.
     #
     # ¿POR QUÉ ES OPCIONAL?
-    #   Bellman-Ford es O(V·E): en este grafo tarda ~16 ms contra ~0.5 ms de
-    #   BFS+Dijkstra juntos. Correrlo en cada búsqueda multiplicaría por ~31 el
-    #   trabajo del endpoint para hacer una comprobación que el usuario no pidió.
+    #   Bellman-Ford es O(V·E): medido, el endpoint tarda ~4 ms sin validar y
+    #   ~39 ms con validar, unas 10 veces más. Correrlo en cada búsqueda
+    #   multiplicaría el trabajo para hacer una comprobación que nadie pidió.
     #   Solo se ejecuta cuando el cliente lo pide explícitamente con ?validar=true,
     #   que es lo que hace el panel de validación de la web.
     if validar:

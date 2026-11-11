@@ -1183,7 +1183,8 @@ button { font-family: inherit; }
   transition: background .12s;
 }
 
-.autocompletado li:hover { background: var(--azul-claro); }
+.autocompletado li:hover,
+.autocompletado li.activo { background: var(--azul-claro); }
 .autocompletado li strong { color: var(--azul); font-weight: 800; }
 
 .autocompletado li small {
@@ -1236,17 +1237,26 @@ button { font-family: inherit; }
 }
 
 /* Marca de coincidencia en el panel de validación. */
-.marca-ok {
+.marca-ok,
+.marca-no {
   margin-left: auto;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: .05em;
   text-transform: uppercase;
-  color: var(--verde);
-  background: var(--verde-claro);
   border-radius: 999px;
   padding: 4px 9px;
   white-space: nowrap;
+}
+
+.marca-ok {
+  color: var(--verde);
+  background: var(--verde-claro);
+}
+
+.marca-no {
+  color: var(--rojo);
+  background: var(--rojo-claro, #ffe4e6);
 }
 
 /* Celda vacía de la tabla (Dijkstra y BFS no tienen "pasadas"). */
