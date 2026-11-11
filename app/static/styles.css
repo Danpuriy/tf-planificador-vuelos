@@ -1278,3 +1278,49 @@ button { font-family: inherit; }
 }
 
 .bp-cerrar:hover { background: rgba(15, 23, 42, .9); }
+
+/* --- Responsive: la app real reemplazó los <a> del nav por <span>, así que
+       la regla del mockup (.nav-derecha a) ya no ocultaba nada y la barra
+       desbordaba en pantallas chicas. --- */
+@media (max-width: 940px) {
+  .nav-derecha > span:not(.aviso-mockup) { display: none; }
+}
+
+@media (max-width: 620px) {
+  .topbar { padding: 10px 14px; gap: 8px; }
+  .nav-derecha { gap: 8px; }
+  .marca .texto { font-size: 16px; }
+  .marca small { font-size: 9px; }
+  .logo { width: 32px; height: 32px; }
+  .aviso-mockup { font-size: 8.5px; padding: 4px 8px; letter-spacing: .04em; }
+
+  .hero { padding: 26px 16px 14px; }
+  .hero h1 { font-size: 25px; }
+  .hero p { font-size: 12.5px; }
+  .tarjeta-busqueda { padding: 14px 14px 16px; border-radius: 16px; }
+  .boton-buscar { font-size: 13.5px; padding: 12px; }
+
+  .barra-resumen { padding: 10px 14px; flex-wrap: wrap; gap: 4px 8px; }
+  .resumen-ruta { font-size: 15px; }
+  .resumen-detalle { font-size: 11px; }
+  .boton-modificar { font-size: 11px; padding: 7px 11px; }
+
+  .columna-resultados { padding: 12px; gap: 10px; }
+  .titulo-resultados h2 { font-size: 16px; }
+  .orden button { font-size: 10.5px; padding: 7px 4px; }
+  .vuelo { padding: 12px 13px; }
+  .extremo { min-width: 52px; }
+  .extremo .hora { font-size: 17px; }
+  .vuelo-trayecto { gap: 8px; }
+  .diagrama .duracion { font-size: 9.5px; }
+  .diagrama .escalas { font-size: 9px; }
+  .vuelo-pie .monto { font-size: 16px; }
+  .etiqueta-opcion { font-size: 8.5px; padding: 3px 7px; }
+  .populares { padding: 0 14px 24px; }
+}
+
+/* En pantallas muy angostas el subtítulo de la marca se parte en dos líneas
+   y empuja el badge. Se oculta antes que deformar la barra. */
+@media (max-width: 480px) {
+  .marca small { display: none; }
+}

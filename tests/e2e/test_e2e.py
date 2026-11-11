@@ -7,6 +7,8 @@ las líneas dibujadas en el mapa.
 No modifican el código de la app: solo la usan como lo haría una persona.
 """
 
+import re
+
 import pytest
 from playwright.sync_api import expect
 
@@ -175,3 +177,72 @@ def test_aeropuerto_inexistente_muestra_error(page):
     )
     page.click("#buscar")
     expect(page.locator("#mensaje")).to_contain_text("no existe", timeout=10000)
+
+
+# ---------------------------------------------------------------------------
+# Interacciones del buscador y de los resultados
+# ---------------------------------------------------------------------------
+def test_intercambiar_origen_y_destino(page):
+    page.fill("#origen", "LIM")
+    page.wait_for_timeout(500)
+    page.locator("#lista-origen li").first.click()
+    page.fill("#destino", "BSB")
+    page.wait_for_timeout(500)
+    page.locator("#lista-destino li").first.click()
+
+    page.click("#intercambiar")
+
+    assert page.input_value("#origen") == "BSB"
+    assert page.input_value("#destino") == "LIM"
+
+
+def test_contador_de_pasajeros_duplica_el_precio(page):
+    # El contador vive en la portada: se ajusta ANTES de buscar.
+    page.click("#campo-pasajeros")
+    page.click('[data-paso="adultos"][data-delta="1"]')
+    page.click("#cerrar-popover")
+    expect(page.locator("#resumen-pasajeros")).to_contain_text("2 adultos")
+
+    buscar(page, "LIM", "BSB")
+
+    # 1 adulto cuesta $ 470.25; con 2 adultos se duplica.
+    expect(page.locator(".tarjeta.dijkstra")).to_contain_text("$ 940.50")
+
+
+def test_ordenar_por_precio_pone_primero_el_mas_barato(page):
+    buscar(page, "LIM", "BSB")
+
+    page.locator(".orden button").nth(1).click()
+
+    primera = page.locator(".tarjeta").first
+    expect(primera).to_have_class(re.compile(r"\bdijkstra\b"))
+
+
+def test_boarding_pass_se_abre_y_se_cierra(page):
+    buscar(page, "LIM", "BSB")
+
+    page.locator('[data-ver="dijkstra"]').click()
+    expect(page.locator("#velo.visible")).to_be_visible()
+    expect(page.locator("#bp-aerolinea")).to_contain_text("Avianca")
+    expect(page.locator(".bp-grid")).to_contain_text("GRU")
+    expect(page.locator(".bp-precio-final")).to_contain_text("$ 470.25")
+
+    page.keyboard.press("Escape")
+    expect(page.locator("#velo.visible")).to_have_count(0)
+
+
+def test_modificar_busqueda_vuelve_a_la_portada(page):
+    buscar(page, "LIM", "BSB")
+
+    page.click("#boton-modificar")
+
+    expect(page.locator("#inicio.activa")).to_be_visible()
+    expect(page.locator("#resultados.activa")).to_have_count(0)
+
+
+def test_sin_desborde_horizontal_en_mobile(page):
+    page.set_viewport_size({"width": 390, "height": 844})
+    buscar(page, "LIM", "BSB")
+
+    ancho = page.evaluate("() => document.documentElement.scrollWidth")
+    assert ancho <= 390, f"la página desborda a {ancho}px"
