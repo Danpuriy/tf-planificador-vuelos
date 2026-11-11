@@ -95,6 +95,65 @@ def test_mapa_dibuja_las_rutas(page):
 
 
 # ---------------------------------------------------------------------------
+# Tiempo, costo y tooltips
+# ---------------------------------------------------------------------------
+def test_tarjetas_muestran_tiempo_y_precio(page):
+    buscar(page, "LIM", "BSB")
+
+    tarjeta_dijkstra = page.locator(".tarjeta.dijkstra")
+    expect(tarjeta_dijkstra).to_contain_text("8 h 06 min")
+    expect(tarjeta_dijkstra).to_contain_text("$470.25")
+
+    # BFS llega por Miami: más largo y más caro.
+    tarjeta_bfs = page.locator(".tarjeta.bfs")
+    expect(tarjeta_bfs).to_contain_text("14 h 48 min")
+    expect(tarjeta_bfs).to_contain_text("$1,048.84")
+
+
+def test_tooltip_del_tramo_muestra_aerolinea_y_precio(page):
+    buscar(page, "LIM", "BSB")
+
+    # Posición en píxeles del punto medio del tramo LIM->GRU, calculada con
+    # la propia API de Leaflet para no depender de coordenadas a ojo.
+    punto = page.evaluate(
+        """() => {
+            const a = mapa.latLngToContainerPoint([-12.0219, -77.114305]);
+            const b = mapa.latLngToContainerPoint([-23.4356, -46.4731]);
+            return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        }"""
+    )
+    caja = page.locator("#mapa").bounding_box()
+    page.mouse.move(caja["x"] + punto["x"], caja["y"] + punto["y"])
+
+    tooltip = page.locator(".tooltip-vuelo")
+    expect(tooltip.first).to_be_visible(timeout=5000)
+    expect(tooltip.first).to_contain_text("LIM → GRU")
+    expect(tooltip.first).to_contain_text("Avianca")
+    expect(tooltip.first).to_contain_text("3,474.66 km")
+    expect(tooltip.first).to_contain_text("$346.68")
+
+
+# ---------------------------------------------------------------------------
+# Validación con Bellman-Ford (bajo demanda)
+# ---------------------------------------------------------------------------
+def test_panel_validacion_ejecuta_bellman_ford(page):
+    buscar(page, "LIM", "BSB")
+
+    # Por defecto NO se ejecuta: hay un botón esperando.
+    expect(page.locator("#boton-validar")).to_be_visible()
+    expect(page.locator(".tabla-validacion")).to_have_count(0)
+
+    page.click("#boton-validar")
+    expect(page.locator(".tabla-validacion")).to_be_visible(timeout=25000)
+
+    # Una fila por algoritmo, y Bellman-Ford coincide con Dijkstra.
+    assert page.locator(".tabla-validacion tbody tr").count() == 3
+    expect(page.locator(".tabla-validacion")).to_contain_text("Bellman-Ford")
+    expect(page.locator(".tabla-validacion")).to_contain_text("8,643")
+    expect(page.locator(".marca-ok")).to_contain_text("Coinciden")
+
+
+# ---------------------------------------------------------------------------
 # Validaciones y errores
 # ---------------------------------------------------------------------------
 def test_campos_vacios_muestran_mensaje(page):

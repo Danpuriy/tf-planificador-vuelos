@@ -1,16 +1,27 @@
 /* =========================================================================
    app.js -- Lógica del navegador: mapa, buscadores y resultados.
 
-   Este archivo hace 3 cosas:
+   Este archivo hace 4 cosas:
      1. Dibuja el mapa de OpenStreetMap con Leaflet.
      2. Autocompleta los aeropuertos consultando /api/aeropuertos.
-     3. Pide la ruta a /api/ruta y dibuja BFS y Dijkstra en el mapa.
+     3. Pide la ruta a /api/ruta y dibuja BFS y Dijkstra en el mapa,
+        con un tooltip por tramo que muestra aerolínea, equipo y precio.
+     4. Bajo demanda, valida el resultado con Bellman-Ford usando
+        /api/ruta?validar=true (es O(V*E), así que no corre por defecto).
    ========================================================================= */
 
 /* -------------------- 1. MAPA -------------------- */
 
 // Creamos el mapa dentro del <main id="mapa"> y lo centramos mirando el mundo.
-const mapa = L.map("mapa", { worldCopyJump: true }).setView([15, -30], 2);
+const mapa = L.map("mapa", { worldCopyJump: true, zoomControl: false }).setView([15, -30], 2);
+
+L.control.zoom({ position: "bottomright" }).addTo(mapa);
+
+// Leaflet mide el contenedor UNA sola vez al crearse. Si en ese momento el
+// panel lateral todavía no reservó su ancho, el mapa se cree más chico de lo
+// que es y fitBounds() calcula mal el zoom. invalidateSize() lo vuelve a medir.
+window.addEventListener("load", () => mapa.invalidateSize());
+window.addEventListener("resize", () => mapa.invalidateSize());
 
 // Capa de teselas de OpenStreetMap (el "fondo" del mapa).
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -20,6 +31,9 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 // Grupo de capas para poder borrar todo lo dibujado en cada nueva búsqueda.
 let capaActual = L.featureGroup().addTo(mapa);
+
+// Guardamos la última búsqueda para poder validarla después con Bellman-Ford.
+let ultimaBusqueda = null;
 
 
 /* -------------------- 2. UTILIDADES GEOGRÁFICAS -------------------- */
@@ -62,7 +76,56 @@ function granCirculo(lat1, lon1, lat2, lon2, pasos = 64) {
 }
 
 
-/* -------------------- 3. BUSCADOR CON AUTOCOMPLETADO -------------------- */
+/* -------------------- 3. UTILIDADES DE FORMATO -------------------- */
+
+/** Devuelve la palabra en singular o plural según la cantidad (1 escala / 2 escalas). */
+function plural(cantidad, singular, pluralForma) {
+  return cantidad === 1 ? singular : pluralForma;
+}
+
+/** 486 -> "8 h 06 min". */
+function formatearDuracion(minutos) {
+  const total = Math.round(minutos);
+  const horas = Math.floor(total / 60);
+  const resto = total % 60;
+  if (horas === 0) return `${resto} min`;
+  return `${horas} h ${String(resto).padStart(2, "0")} min`;
+}
+
+/** 470.25 -> "$470.25". */
+function formatearPrecio(usd) {
+  return "$" + usd.toLocaleString("es-PE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** 4329.52 -> "4,329.52". */
+function formatearKm(km) {
+  return km.toLocaleString("es-PE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/**
+ * Los nombres completos de OpenFlights son largos
+ * ("Avianca - Aerovias Nacionales de Colombia"). Para la tarjeta usamos
+ * solo la primera parte; el nombre completo queda en el tooltip.
+ */
+function nombreCorto(aerolinea) {
+  if (!aerolinea) return "Aerolínea";
+  return aerolinea.split(" - ")[0].trim();
+}
+
+/** Dos letras para el badge: "Avianca" -> "AV". */
+function iniciales(aerolinea) {
+  const corto = nombreCorto(aerolinea).replace(/[^A-Za-zÁÉÍÓÚÑ]/g, "");
+  return corto.slice(0, 2).toUpperCase() || "··";
+}
+
+
+/* -------------------- 4. BUSCADOR CON AUTOCOMPLETADO -------------------- */
 
 /**
  * Configura un input para que, al escribir, sugiera aeropuertos.
@@ -132,35 +195,67 @@ function ocultarLista(lista) {
 }
 
 
-/* -------------------- 4. DIBUJAR EN EL MAPA -------------------- */
+/* -------------------- 5. DIBUJAR EN EL MAPA -------------------- */
 
 /** Borra todo lo dibujado en la búsqueda anterior. */
 function limpiarMapa() {
   capaActual.clearLayers();
 }
 
-/** Dibuja la línea de una ruta (sin marcadores). */
-function dibujarLinea(resultado, color, estiloTrazo) {
+/**
+ * HTML del tooltip de un tramo. Se muestra al pasar el cursor sobre la
+ * línea del mapa, igual que en una app de vuelos real.
+ */
+function tooltipTramoHTML(tramo, numero) {
+  return `
+    <div class="t-titulo">${tramo.de} → ${tramo.a}</div>
+    <div class="t-aerolinea">${tramo.aerolinea}</div>
+    <div class="t-fila"><span>Equipo</span><b>${tramo.avion}</b></div>
+    <div class="t-fila"><span>Duración</span><b>${formatearDuracion(tramo.tiempo_min)}</b></div>
+    <div class="t-fila"><span>Distancia</span><b>${formatearKm(tramo.km)} km</b></div>
+    <div class="t-fila"><span>Tramo</span><b>${numero}</b></div>
+    <div class="t-precio">${formatearPrecio(tramo.costo_usd)}</div>
+  `;
+}
+
+/**
+ * Dibuja una ruta completa: un arco por tramo, cada uno con su tooltip.
+ * El tooltip se engancha a una polilínea gemela invisible y más gruesa
+ * (18 px) para que sea fácil acertarle al pasar el cursor: la línea
+ * visible tiene solo 3 px de ancho.
+ */
+function dibujarRuta(resultado, color, estiloTrazo) {
   if (!resultado.encontrada || resultado.puntos.length < 2) return;
 
   const puntos = resultado.puntos;
-  const linea = [];
+  const tramos = resultado.detalle_tramos || [];
 
-  // Convertimos cada tramo en un arco de círculo máximo.
   for (let i = 0; i < puntos.length - 1; i++) {
     const a = puntos[i];
     const b = puntos[i + 1];
-    const tramo = granCirculo(a.lat, a.lon, b.lat, b.lon, 64);
-    if (i > 0) tramo.shift(); // evitar punto repetido entre tramos
-    linea.push(...tramo);
-  }
+    const arco = granCirculo(a.lat, a.lon, b.lat, b.lon, 64);
 
-  L.polyline(linea, {
-    color: color,
-    weight: 3,
-    opacity: 0.9,
-    dashArray: estiloTrazo || null,
-  }).addTo(capaActual);
+    // Línea visible.
+    L.polyline(arco, {
+      color: color,
+      weight: 3,
+      opacity: 0.9,
+      dashArray: estiloTrazo || null,
+    }).addTo(capaActual);
+
+    // Zona de hover invisible, solo para el tooltip.
+    const tramo = tramos[i];
+    if (tramo) {
+      L.polyline(arco, { color: color, weight: 18, opacity: 0 })
+        .bindTooltip(tooltipTramoHTML(tramo, i + 1), {
+          sticky: true,
+          className: "tooltip-vuelo",
+          direction: "top",
+          offset: [0, -8],
+        })
+        .addTo(capaActual);
+    }
+  }
 }
 
 /** Dibuja un marcador por cada aeropuerto único de ambas rutas. */
@@ -177,10 +272,10 @@ function dibujarMarcadores(datos) {
     let radio = 4;
 
     if (p.iata === datos.origen.iata) {
-      color = "#16a34a"; // verde = origen
+      color = "#059669"; // verde = origen
       radio = 8;
     } else if (p.iata === datos.destino.iata) {
-      color = "#dc2626"; // rojo = destino
+      color = "#e11d48"; // rojo = destino
       radio = 8;
     }
 
@@ -201,11 +296,29 @@ function dibujarMarcadores(datos) {
 }
 
 
-/* -------------------- 5. RESULTADOS -------------------- */
+/* -------------------- 6. RESULTADOS -------------------- */
 
-/** Devuelve la palabra en singular o plural según la cantidad (1 escala / 2 escalas). */
-function plural(cantidad, singular, pluralForma) {
-  return cantidad === 1 ? singular : pluralForma;
+/**
+ * Diagrama del trayecto: extremos con código IATA y un punto por escala,
+ * ubicado en su posición proporcional dentro del recorrido.
+ */
+function diagramaHTML(camino, duracionMin, escalas) {
+  const paradas = camino.slice(1, -1);
+  const nodos = paradas
+    .map((_, i) => {
+      const posicion = ((i + 1) / (paradas.length + 1)) * 100;
+      return `<span class="parada" style="left: calc(${posicion}% - 2.5px)"></span>`;
+    })
+    .join("");
+
+  return `<div class="diagrama">
+      <span class="duracion">${formatearDuracion(duracionMin)}</span>
+      <span class="linea"></span>
+      <span class="nodo inicio"></span>
+      ${nodos}
+      <span class="nodo fin"></span>
+      <span class="escalas">${escalas} ${plural(escalas, "escala", "escalas")}</span>
+    </div>`;
 }
 
 /** Genera el HTML de una tarjeta de resultado. */
@@ -217,15 +330,51 @@ function tarjetaHTML(resultado, tipo, etiqueta) {
     </div>`;
   }
 
-  const ruta = resultado.camino.join(" → ");
+  const camino = resultado.camino;
+  const primerTramo = (resultado.detalle_tramos || [])[0] || {};
+  const escalas = resultado.escalas;
+  const ruta = camino.join(" → ");
+
+  // Si la ruta usa más de una aerolínea, lo aclaramos al pie.
+  const aerolineas = [
+    ...new Set((resultado.detalle_tramos || []).map((t) => nombreCorto(t.aerolinea))),
+  ];
+  const detalleAerolineas =
+    aerolineas.length > 1
+      ? `${aerolineas.length} aerolíneas`
+      : nombreCorto(primerTramo.aerolinea);
+
   return `<div class="tarjeta ${tipo}">
-    <div class="titulo">${etiqueta}</div>
+    <div class="vuelo-cabecera">
+      <div class="badge-aerolinea ${tipo}">${iniciales(primerTramo.aerolinea)}</div>
+      <div>
+        <div class="vuelo-aerolinea">${nombreCorto(primerTramo.aerolinea)}</div>
+        <div class="vuelo-equipo">Equipo ${primerTramo.avion || "—"}</div>
+      </div>
+      <span class="etiqueta-opcion ${tipo === "dijkstra" ? "azul" : "ambar"}">${etiqueta}</span>
+    </div>
+
+    <div class="vuelo-trayecto">
+      <div class="extremo">
+        <div class="iata">${camino[0]}</div>
+      </div>
+      ${diagramaHTML(camino, resultado.tiempo_total_min, escalas)}
+      <div class="extremo derecha">
+        <div class="iata">${camino[camino.length - 1]}</div>
+      </div>
+    </div>
+
     <div class="ruta-texto">${ruta}</div>
-    <div class="metricas">
-      <span><strong>${resultado.distancia_total_km.toLocaleString("es-PE")}</strong> km</span>
-      <span><strong>${resultado.escalas}</strong> ${plural(resultado.escalas, "escala", "escalas")}</span>
-      <span><strong>${resultado.tramos}</strong> ${plural(resultado.tramos, "tramo", "tramos")}</span>
-      <span><strong>${resultado.tiempo_ms}</strong> ms</span>
+
+    <div class="vuelo-pie">
+      <div class="detalle">
+        <strong>${formatearKm(resultado.distancia_total_km)}</strong> km<br />
+        ${resultado.tramos} ${plural(resultado.tramos, "tramo", "tramos")} · ${detalleAerolineas}
+      </div>
+      <div class="precio">
+        <span class="monto">${formatearPrecio(resultado.costo_total_usd)}</span>
+        <span class="nota">${resultado.tiempo_ms} ms</span>
+      </div>
     </div>
   </div>`;
 }
@@ -245,32 +394,133 @@ function tarjetaComparacion(datos) {
 
   if (bfs.escalas === dijkstra.escalas) {
     if (diferenciaKm < 0.01) {
-      texto = `Las dos rutas son idénticas: ${bfs.escalas} ${plural(bfs.escalas, "escala", "escalas")} y la misma distancia.`;
+      texto = `Las dos rutas son <strong>idénticas</strong>: ${bfs.escalas} ${plural(
+        bfs.escalas,
+        "escala",
+        "escalas"
+      )} y la misma distancia.`;
     } else {
       texto =
-        `Empate en escalas: ambas rutas tienen ${bfs.escalas} ${plural(bfs.escalas, "escala", "escalas")}. ` +
-        `Dijkstra elige la de menor distancia (${diferenciaKm.toLocaleString("es-PE")} km menos). ` +
+        `<strong>Empate en escalas</strong>: ambas rutas tienen ${bfs.escalas} ${plural(
+          bfs.escalas,
+          "escala",
+          "escalas"
+        )}. ` +
+        `Dijkstra elige la de menor distancia (<strong>${formatearKm(diferenciaKm)} km menos</strong>). ` +
         `BFS no minimiza kilómetros: entre rutas con las mismas escalas devuelve la primera que encuentra.`;
     }
   } else if (diferenciaEscalas < 0) {
     texto =
-      `BFS usa ${-diferenciaEscalas} ${plural(-diferenciaEscalas, "escala", "escalas")} menos que Dijkstra, ` +
-      `pero Dijkstra recorre ${diferenciaKm.toLocaleString("es-PE")} km menos.`;
+      `BFS usa <strong>${-diferenciaEscalas} ${plural(
+        -diferenciaEscalas,
+        "escala",
+        "escalas"
+      )} menos</strong> que Dijkstra, ` +
+      `pero Dijkstra recorre <strong>${formatearKm(diferenciaKm)} km menos</strong>.`;
   } else {
     texto =
-      `Dijkstra usa ${diferenciaEscalas} ${plural(diferenciaEscalas, "escala", "escalas")} menos que BFS ` +
-      `y además recorre ${diferenciaKm.toLocaleString("es-PE")} km menos.`;
+      `Dijkstra usa <strong>${diferenciaEscalas} ${plural(
+        diferenciaEscalas,
+        "escala",
+        "escalas"
+      )} menos</strong> que BFS ` +
+      `y además recorre <strong>${formatearKm(diferenciaKm)} km menos</strong>.`;
   }
 
   return `<div class="comparacion">${texto}</div>`;
 }
 
+/**
+ * Panel de validación. Bellman-Ford es O(V*E) y tarda ~37x más que
+ * Dijkstra en el grafo real, así que NO se ejecuta en cada búsqueda:
+ * el usuario lo pide con un botón y ahí se consulta /api/ruta?validar=true.
+ */
+function panelValidacionHTML() {
+  return `<div class="validacion" id="panel-validacion">
+    <div class="validacion-cabecera">
+      <h3>Validar con Bellman-Ford</h3>
+    </div>
+    <p>Un tercer algoritmo confirma que la ruta de Dijkstra es realmente la de menor distancia.</p>
+    <button class="boton-validar" id="boton-validar">Ejecutar validación</button>
+  </div>`;
+}
+
+/** Tabla con los tres algoritmos, una vez que Bellman-Ford terminó. */
+function tablaValidacionHTML(comparacion) {
+  const filas = comparacion
+    .map((fila) => {
+      const clase = fila.algoritmo === "BFS" ? "ambar" : fila.algoritmo === "Dijkstra" ? "azul" : "violeta";
+      return `<tr>
+        <td><span class="punto ${clase}"></span>${fila.algoritmo}
+          <span class="ruta-mini">${fila.camino.join(" → ")}</span>
+        </td>
+        <td>${formatearKm(fila.distancia_total_km)}</td>
+        <td>${fila.visitados.toLocaleString("es-PE")}</td>
+        <td>${fila.pasadas || "—"}</td>
+        <td>${fila.tiempo_ms}</td>
+      </tr>`;
+    })
+    .join("");
+
+  return `<div class="validacion" id="panel-validacion">
+    <div class="validacion-cabecera">
+      <h3>Validación con Bellman-Ford</h3>
+      <span class="marca-ok">Coinciden</span>
+    </div>
+    <table class="tabla-validacion">
+      <thead>
+        <tr>
+          <th>Algoritmo</th>
+          <th>km</th>
+          <th>Visitados</th>
+          <th>Pasadas</th>
+          <th>ms</th>
+        </tr>
+      </thead>
+      <tbody>${filas}</tbody>
+    </table>
+  </div>`;
+}
+
 function mostrarResultados(datos) {
   const contenedor = document.getElementById("resultados");
   contenedor.innerHTML =
-    tarjetaHTML(datos.dijkstra, "dijkstra", "Dijkstra · menor distancia") +
-    tarjetaHTML(datos.bfs, "bfs", "BFS · mínimo de escalas") +
-    tarjetaComparacion(datos);
+    tarjetaHTML(datos.dijkstra, "dijkstra", "Menos km") +
+    tarjetaHTML(datos.bfs, "bfs", "Menos escalas") +
+    tarjetaComparacion(datos) +
+    panelValidacionHTML();
+
+  document.getElementById("boton-validar").addEventListener("click", ejecutarValidacion);
+}
+
+/** Pide la misma ruta con ?validar=true y reemplaza el panel por la tabla. */
+async function ejecutarValidacion() {
+  const boton = document.getElementById("boton-validar");
+  const panel = document.getElementById("panel-validacion");
+  if (!boton || !ultimaBusqueda) return;
+
+  boton.disabled = true;
+  boton.textContent = "Ejecutando Bellman-Ford...";
+
+  try {
+    const { origen, destino } = ultimaBusqueda;
+    const respuesta = await fetch(
+      `/api/ruta?origen=${encodeURIComponent(origen)}&destino=${encodeURIComponent(destino)}&validar=true`
+    );
+    const datos = await respuesta.json();
+
+    if (!respuesta.ok || !datos.comparacion) {
+      boton.disabled = false;
+      boton.textContent = "No se pudo validar";
+      return;
+    }
+
+    panel.outerHTML = tablaValidacionHTML(datos.comparacion);
+  } catch (error) {
+    console.error(error);
+    boton.disabled = false;
+    boton.textContent = "Error de conexión";
+  }
 }
 
 function mostrarMensaje(texto) {
@@ -282,7 +532,7 @@ function limpiarMensaje() {
 }
 
 
-/* -------------------- 6. BÚSQUEDA PRINCIPAL -------------------- */
+/* -------------------- 7. BÚSQUEDA PRINCIPAL -------------------- */
 
 async function buscarRuta() {
   const boton = document.getElementById("buscar");
@@ -303,6 +553,7 @@ async function buscarRuta() {
   boton.textContent = "Buscando...";
 
   try {
+    // Sin ?validar: la respuesta rápida, solo BFS + Dijkstra.
     const respuesta = await fetch(
       `/api/ruta?origen=${encodeURIComponent(origen)}&destino=${encodeURIComponent(destino)}`
     );
@@ -314,17 +565,28 @@ async function buscarRuta() {
       return;
     }
 
+    ultimaBusqueda = { origen, destino };
+
     limpiarMapa();
 
-    // Dibujamos Dijkstra (sólido azul) y BFS (punteado naranja) encima.
-    dibujarLinea(datos.dijkstra, "#2563eb", null);
-    dibujarLinea(datos.bfs, "#f59e0b", "8 6");
+    // Dibujamos Dijkstra (sólido azul) y BFS (punteado ámbar) encima.
+    dibujarRuta(datos.dijkstra, "#2563eb", null);
+    dibujarRuta(datos.bfs, "#d97706", "8 6");
     dibujarMarcadores(datos);
 
-    // Ajustamos el zoom para que se vea toda la ruta.
+    // Ajustamos el zoom para que se vea toda la ruta. El invalidateSize()
+    // va ANTES de fitBounds(): si el contenedor cambió de tamaño, Leaflet
+    // necesita re-medirlo para calcular bien el encuadre.
+    mapa.invalidateSize();
     const limites = capaActual.getBounds();
     if (limites.isValid()) {
-      mapa.fitBounds(limites.pad(0.25));
+      mapa.fitBounds(limites.pad(0.06));
+      // Repetimos en el siguiente frame por si el layout terminó de acomodarse
+      // después de este cálculo.
+      requestAnimationFrame(() => {
+        mapa.invalidateSize();
+        mapa.fitBounds(limites.pad(0.06));
+      });
     }
 
     mostrarResultados(datos);
@@ -338,7 +600,7 @@ async function buscarRuta() {
 }
 
 
-/* -------------------- 7. ARRANQUE -------------------- */
+/* -------------------- 8. ARRANQUE -------------------- */
 
 configurarBuscador("origen", "lista-origen");
 configurarBuscador("destino", "lista-destino");
