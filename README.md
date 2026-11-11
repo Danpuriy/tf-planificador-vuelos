@@ -127,8 +127,8 @@ Bellman-Ford devuelven la mínima distancia.
 | `GET /api/ruta?origen=LIM&destino=BSB&validar=true` | Agrega Bellman-Ford y la comparación |
 
 `validar` es **opcional a propósito**: Bellman-Ford cuesta `O(V · E)` y no hace
-falta para dibujar la pantalla. Medido en local: **1.75 ms** sin validar contra
-**17.58 ms** con validar.
+falta para dibujar la pantalla. Medido en local con la API: **4.05 ms** sin
+validar contra **39.27 ms** con validar, unas 10 veces más.
 
 ```bash
 curl "http://127.0.0.1:8000/api/ruta?origen=LIM&destino=BSB&validar=true"
@@ -172,15 +172,17 @@ cada escala suma 90 minutos. Las fechas son cosméticas; el grafo es estático.
   Haversine nunca ocurren, pero el algoritmo los reporta).
 
 Los tres devuelven un `ResultadoRuta` con camino, distancia total, tramos,
-escalas, tiempo, costo y cuántos nodos se visitaron.
+escalas, tiempo y costo. BFS y Dijkstra además reportan cuántos nodos
+visitaron; Bellman-Ford reporta **relajaciones** y pasadas, que es lo que
+realmente mide su trabajo.
 
 ### Caso de referencia: LIM → BSB
 
-| Algoritmo | Ruta | km | Tiempo | Costo | Visitados |
+| Algoritmo | Ruta | km | Tiempo | Costo | Trabajo |
 |---|---|---|---|---|---|
-| BFS | LIM → MIA → BSB | 10,026.55 | 888 min | $ 1,048.84 | 10 |
-| Dijkstra | LIM → GRU → BSB | 4,329.52 | 486 min | $ 470.25 | 317 |
-| Bellman-Ford | LIM → GRU → BSB | 4,329.52 | 486 min | $ 470.25 | 8,643 (7 pasadas) |
+| BFS | LIM → MIA → BSB | 10,026.55 | 888 min | $ 1,048.84 | 10 nodos |
+| Dijkstra | LIM → GRU → BSB | 4,329.52 | 486 min | $ 470.25 | 317 nodos |
+| Bellman-Ford | LIM → GRU → BSB | 4,329.52 | 486 min | $ 470.25 | 8,643 relajaciones en 7 pasadas |
 
 Los dos caminos tienen **la misma cantidad de escalas**, pero difieren en
 **5,697.03 km**. Es el ejemplo que mejor muestra que BFS y Dijkstra no son
