@@ -20,6 +20,19 @@ let destino = null;
 // Última respuesta de la API. Se guarda para reordenar sin volver a pedirla.
 let datosActuales = null;
 
+// Un viaje puede tener más de un tramo: "solo ida" tiene uno, "ida y vuelta"
+// tiene dos. Se guardan todos juntos para poder cambiar entre ellos sin volver
+// a pedirle nada al servidor.
+let legs = [];            // [{ etiqueta: "Ida" | "Vuelta", datos }]
+let legActivo = 0;        // índice del tramo que se está mostrando
+let tipoViaje = "solo-ida";
+
+// Fechas mostradas en pantalla. El grafo es estático, así que no afectan el
+// cálculo: sirven para que el resumen diga algo coherente.
+let fechaIdaTexto = "";
+let fechaVueltaTexto = "";
+
+
 // Pasajeros: solo afectan el precio mostrado, no la ruta.
 const pasajeros = { adultos: 1, ninos: 0, bebes: 0 };
 
@@ -111,6 +124,19 @@ function mostrarMensaje(texto) {
   document.getElementById("mensaje").textContent = texto || "";
 }
 
+async function pedirRuta(iataOrigen, iataDestino) {
+  const respuesta = await fetch(
+    `/api/ruta?origen=${encodeURIComponent(iataOrigen)}&destino=${encodeURIComponent(iataDestino)}`
+  );
+  const datos = await respuesta.json();
+
+  if (!respuesta.ok) {
+    throw new Error(datos.error || "No se pudo calcular la ruta.");
+  }
+
+  return datos;
+}
+
 async function buscar() {
   const boton = document.getElementById("buscar");
   const iataOrigen = document.getElementById("origen").value.trim().toUpperCase();
@@ -127,23 +153,28 @@ async function buscar() {
   boton.textContent = "Buscando...";
 
   try {
-    const respuesta = await fetch(
-      `/api/ruta?origen=${encodeURIComponent(iataOrigen)}&destino=${encodeURIComponent(iataDestino)}`
-    );
-    const datos = await respuesta.json();
+    const ida = await pedirRuta(iataOrigen, iataDestino);
+    const nuevos = [{ etiqueta: "Ida", datos: ida }];
 
-    if (!respuesta.ok) {
-      mostrarMensaje(datos.error || "No se pudo calcular la ruta.");
-      return;
+    // "Ida y vuelta" es la misma búsqueda con los aeropuertos invertidos.
+    // El grafo es dirigido, así que la vuelta no es espejo de la ida: se
+    // calcula de verdad y puede dar un camino distinto.
+    if (tipoViaje === "ida-vuelta") {
+      const vuelta = await pedirRuta(iataDestino, iataOrigen);
+      nuevos.push({ etiqueta: "Vuelta", datos: vuelta });
     }
 
-    datosActuales = datos;
-    origen = datos.origen;
-    destino = datos.destino;
+    legs = nuevos;
+    legActivo = 0;
+    datosActuales = legs[0].datos;
+    origen = datosActuales.origen;
+    destino = datosActuales.destino;
 
     mostrarPantalla(pantallaResultados);
     pintarAeropuertos();
     pintarPasajeros();
+    pintarFechas();
+    pintarSelectorTramos();
 
     renderizarVuelos();
     renderizarComparacion();
@@ -155,12 +186,102 @@ async function buscar() {
     dibujarTodo();
   } catch (error) {
     console.error(error);
-    mostrarMensaje("Error de conexión con el servidor.");
+    mostrarMensaje(error.message || "Error de conexión con el servidor.");
   } finally {
     boton.disabled = false;
     boton.textContent = "Buscar vuelos";
   }
 }
+
+/* -------------------- 3b. TRAMOS DEL VIAJE -------------------- */
+
+/** Pinta las pestañas "Ida" / "Vuelta". Solo aparecen si hay más de un tramo. */
+function pintarSelectorTramos() {
+  const contenedor = document.getElementById("selector-tramos");
+  if (!contenedor) return;
+
+  if (legs.length < 2) {
+    contenedor.innerHTML = "";
+    contenedor.hidden = true;
+    pintarTotales();
+    return;
+  }
+
+  contenedor.hidden = false;
+  contenedor.innerHTML = legs
+    .map((leg, indice) => {
+      const activo = indice === legActivo ? " activo" : "";
+      const dijkstra = leg.datos.dijkstra;
+      const ruta = dijkstra && dijkstra.encontrada ? dijkstra.camino.join(" → ") : "sin ruta";
+      return `<button class="tramo${activo}" data-tramo="${indice}">
+        <span class="tramo-etiqueta">${leg.etiqueta}</span>
+        <span class="tramo-ruta">${ruta}</span>
+      </button>`;
+    })
+    .join("");
+
+  contenedor.querySelectorAll("[data-tramo]").forEach((boton) => {
+    boton.addEventListener("click", () => cambiarTramo(Number(boton.dataset.tramo)));
+  });
+
+  pintarTotales();
+}
+
+/** Cambia el tramo visible sin volver a pedir la ruta al servidor. */
+function cambiarTramo(indice) {
+  if (indice === legActivo || !legs[indice]) return;
+
+  legActivo = indice;
+  datosActuales = legs[indice].datos;
+  origen = datosActuales.origen;
+  destino = datosActuales.destino;
+
+  pintarSelectorTramos();
+  renderizarVuelos();
+  renderizarComparacion();
+  renderizarValidacion();
+  dibujarTodo();
+}
+
+/** Muestra el total del viaje en la barra de resumen cuando hay varios tramos. */
+function pintarTotales() {
+  const contenedor = document.getElementById("res-total");
+  if (!contenedor) return;
+
+  if (legs.length < 2) {
+    contenedor.hidden = true;
+    contenedor.textContent = "";
+    return;
+  }
+
+  let km = 0;
+  let minutos = 0;
+  let usd = 0;
+  let completa = true;
+
+  legs.forEach(({ datos }) => {
+    const dijkstra = datos.dijkstra;
+    if (!dijkstra || !dijkstra.encontrada) {
+      completa = false;
+      return;
+    }
+    km += dijkstra.distancia_total_km;
+    minutos += dijkstra.tiempo_total_min;
+    usd += dijkstra.costo_total_usd;
+  });
+
+  contenedor.hidden = false;
+
+  if (!completa) {
+    contenedor.textContent = "Ida y vuelta · una de las dos rutas no existe";
+    return;
+  }
+
+  contenedor.innerHTML =
+    `Ida y vuelta · ${formatearKm(km)} km · ${formatearDuracion(minutos)} · ` +
+    `<strong>${formatearPrecio(precioConPasajeros(usd))}</strong> total`;
+}
+
 
 /* -------------------- 4. TARJETAS DE VUELO -------------------- */
 
@@ -356,12 +477,69 @@ function ordenar(resultados) {
   return copia;
 }
 
+/**
+ * Etiqueta honesta para la tarjeta de BFS.
+ *
+ * BFS garantiza la menor cantidad de escalas, pero eso no siempre significa
+ * que gane: cuando hay un vuelo directo, Dijkstra también lo encuentra y
+ * empatan. Afirmar "Menos escalas" siempre sería mentirle al usuario.
+ */
+function etiquetaBfs(bfs, dijkstra) {
+  if (!dijkstra.encontrada) return "Única ruta";
+  if (bfs.escalas < dijkstra.escalas) return "Menos escalas";
+  if (bfs.escalas > dijkstra.escalas) return "Ruta alternativa";
+  return "Mismas escalas";
+}
+
+/** Explica qué criterio se está aplicando y por qué el orden cambió (o no). */
+const CRITERIOS = {
+  mejor: { nombre: "distancia", valor: (r) => `${formatearKm(r.distancia_total_km)} km` },
+  barato: { nombre: "precio", valor: (r) => formatearPrecio(precioConPasajeros(r.costo_total_usd)) },
+  rapido: { nombre: "duración", valor: (r) => formatearDuracion(r.tiempo_total_min) },
+  escalas: { nombre: "escalas", valor: (r) => `${r.escalas} ${plural(r.escalas, "escala", "escalas")}` },
+};
+
+function pintarNotaOrden() {
+  const nota = document.getElementById("nota-orden");
+  if (!nota) return;
+
+  const rutas = [datosActuales.dijkstra, datosActuales.bfs].filter((r) => r.encontrada);
+
+  if (rutas.length < 2) {
+    nota.hidden = true;
+    nota.textContent = "";
+    return;
+  }
+
+  const criterio = CRITERIOS[ordenActual] || CRITERIOS.mejor;
+  const [primera, segunda] = ordenar(rutas);
+  const valorPrimera = criterio.valor(primera);
+  const valorSegunda = criterio.valor(segunda);
+
+  nota.hidden = false;
+
+  if (valorPrimera === valorSegunda) {
+    nota.textContent = `Ambas rutas empatan en ${criterio.nombre} (${valorPrimera}).`;
+  } else {
+    nota.textContent =
+      `${criterio.nombre}: ${primera.algoritmo} ${valorPrimera} · ${segunda.algoritmo} ${valorSegunda}`;
+  }
+}
+
 function renderizarVuelos() {
   const contenedor = document.getElementById("lista-vuelos");
   const rutas = [datosActuales.dijkstra, datosActuales.bfs].filter((r) => r.encontrada);
+  const opciones = document.getElementById("res-opciones");
+
+  if (opciones) {
+    opciones.textContent = rutas.length
+      ? `${rutas.length} ${plural(rutas.length, "opción encontrada", "opciones encontradas")}`
+      : "sin rutas";
+  }
 
   if (!rutas.length) {
     contenedor.innerHTML = `<div class="comparacion">No hay ninguna ruta entre esos dos aeropuertos.</div>`;
+    pintarNotaOrden();
     return;
   }
 
@@ -371,11 +549,13 @@ function renderizarVuelos() {
       return tarjetaHTML(
         r,
         esDijkstra ? "dijkstra" : "bfs",
-        esDijkstra ? "Mejor opción" : "Menos escalas",
+        esDijkstra ? "Mejor opción" : etiquetaBfs(datosActuales.bfs, datosActuales.dijkstra),
         esDijkstra ? "azul" : "ambar"
       );
     })
     .join("");
+
+  pintarNotaOrden();
 
   // Resaltar la ruta de la tarjeta sobre la que está el cursor.
   contenedor.querySelectorAll(".vuelo").forEach((tarjeta) => {
@@ -851,6 +1031,11 @@ document.querySelectorAll(".tipo").forEach((boton) => {
   boton.addEventListener("click", () => {
     document.querySelectorAll(".tipo").forEach((b) => b.classList.remove("activo"));
     boton.classList.add("activo");
+    tipoViaje = boton.dataset.tipo;
+
+    // La fecha de vuelta solo tiene sentido si hay vuelta.
+    const campoVuelta = document.querySelector(".campo-vuelta");
+    if (campoVuelta) campoVuelta.classList.toggle("inactivo", tipoViaje !== "ida-vuelta");
   });
 });
 
@@ -884,12 +1069,19 @@ function pintarFechas() {
   const vuelta = new Date(hoy.getTime() + 7 * 24 * 60 * 60 * 1000);
   const formato = { day: "2-digit", month: "short", year: "numeric" };
 
-  const ida = hoy.toLocaleDateString("es-PE", formato);
-  const regreso = vuelta.toLocaleDateString("es-PE", formato);
+  fechaIdaTexto = hoy.toLocaleDateString("es-PE", formato);
+  fechaVueltaTexto = vuelta.toLocaleDateString("es-PE", formato);
 
-  document.getElementById("fecha-ida").textContent = ida;
-  document.getElementById("fecha-vuelta").textContent = regreso;
-  document.getElementById("res-fecha").textContent = ida;
+  document.getElementById("fecha-ida").textContent = fechaIdaTexto;
+  document.getElementById("fecha-vuelta").textContent = fechaVueltaTexto;
+
+  // En la barra de resumen solo se muestra la vuelta si el viaje la tiene.
+  document.getElementById("res-fecha").textContent =
+    tipoViaje === "ida-vuelta" ? `${fechaIdaTexto} — ${fechaVueltaTexto}` : fechaIdaTexto;
+
+  // El campo de vuelta se atenúa cuando el viaje es solo de ida.
+  const campoVuelta = document.querySelector(".campo-vuelta");
+  if (campoVuelta) campoVuelta.classList.toggle("inactivo", tipoViaje !== "ida-vuelta");
 }
 
 pintarFechas();

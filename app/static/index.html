@@ -6,7 +6,7 @@
 <title>Planificador de Vuelos · AeroRutas</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="/static/styles.css?v=10" />
+<link rel="stylesheet" href="/static/styles.css?v=11" />
 </head>
 <body>
 
@@ -42,9 +42,8 @@
 
     <!-- Tipo de viaje -->
     <div class="tipos-viaje" id="tipos-viaje">
-      <button class="tipo activo" data-tipo="ida-vuelta">Ida y vuelta</button>
-      <button class="tipo" data-tipo="solo-ida">Solo ida</button>
-      <button class="tipo" data-tipo="multidestino">Multidestino</button>
+      <button class="tipo" data-tipo="ida-vuelta">Ida y vuelta</button>
+      <button class="tipo activo" data-tipo="solo-ida">Solo ida</button>
     </div>
 
     <!-- Campos -->
@@ -187,6 +186,8 @@
       <span id="res-pasajeros">1 adulto · Economía</span>
     </div>
 
+    <div class="resumen-total" id="res-total" hidden></div>
+
     <button class="boton-modificar" id="boton-modificar">Modificar búsqueda</button>
   </div>
 
@@ -196,8 +197,10 @@
 
       <div class="titulo-resultados">
         <h2>Elegí tu vuelo</h2>
-        <span>2 opciones encontradas</span>
+        <span id="res-opciones">2 opciones encontradas</span>
       </div>
+
+      <div class="selector-tramos" id="selector-tramos" hidden></div>
 
       <div class="orden">
         <button class="activo">Mejor</button>
@@ -205,6 +208,8 @@
         <button>Más rápido</button>
         <button>Menos escalas</button>
       </div>
+
+      <div class="nota-orden" id="nota-orden" hidden></div>
 
       <div id="lista-vuelos"></div>
       <div id="panel-comparacion"></div>
@@ -276,6 +281,6 @@
 
 <!-- ============================ LEAFLET ============================ -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

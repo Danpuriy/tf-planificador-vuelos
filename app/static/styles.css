@@ -1324,3 +1324,74 @@ button { font-family: inherit; }
 @media (max-width: 480px) {
   .marca small { display: none; }
 }
+
+/* ---------- Resumen con varios tramos ---------- */
+.resumen-total {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tinta);
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+
+.resumen-total strong { font-weight: 800; }
+
+/* ---------- Selector Ida / Vuelta ---------- */
+.selector-tramos {
+  display: flex;
+  gap: 6px;
+}
+
+.tramo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  border: 1px solid var(--borde);
+  background: var(--blanco);
+  border-radius: 10px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: .15s;
+  text-align: left;
+}
+
+.tramo:hover { border-color: #cbd5e1; }
+
+.tramo.activo {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, .12);
+}
+
+.tramo-etiqueta {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--tenue);
+}
+
+.tramo.activo .tramo-etiqueta { color: #2563eb; }
+
+.tramo-ruta {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tinta);
+}
+
+/* ---------- Nota del criterio de orden ---------- */
+.nota-orden {
+  font-size: 11.5px;
+  color: var(--suave);
+  background: #f8fafc;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 6px 10px;
+  line-height: 1.4;
+}
+
+/* El campo de vuelta se atenúa cuando el viaje es solo de ida. */
+.campo-vuelta.inactivo { opacity: .45; }

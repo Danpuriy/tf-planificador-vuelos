@@ -209,13 +209,86 @@ def test_contador_de_pasajeros_duplica_el_precio(page):
     expect(page.locator(".tarjeta.dijkstra")).to_contain_text("$ 940.50")
 
 
-def test_ordenar_por_precio_pone_primero_el_mas_barato(page):
+def test_ordenar_por_escalas_cambia_el_orden_de_las_tarjetas(page):
+    # BKI->BIK es un par donde los algoritmos NO empatan: BFS hace 2 escalas
+    # y Dijkstra 3. Por eso sirve para probar que el orden cambia de verdad.
+    # (LIM->BSB no sirve: Dijkstra gana en los cuatro criterios y el orden
+    # queda igual, que es justamente lo que hacía parecer roto al botón.)
+    buscar(page, "BKI", "BIK")
+
+    # "Mejor" ordena por distancia: Dijkstra primero.
+    expect(page.locator(".tarjeta").first).to_have_class(re.compile(r"\bdijkstra\b"))
+
+    page.locator(".orden button").nth(3).click()
+
+    expect(page.locator(".tarjeta").first).to_have_class(re.compile(r"\bbfs\b"))
+
+
+def test_la_nota_de_orden_explica_el_criterio(page):
+    buscar(page, "BKI", "BIK")
+
+    nota = page.locator("#nota-orden")
+    expect(nota).to_be_visible()
+    expect(nota).to_contain_text("distancia")
+
+    page.locator(".orden button").nth(3).click()
+    expect(nota).to_contain_text("escalas")
+
+
+def test_badge_de_bfs_no_miente_cuando_empatan_en_escalas(page):
+    # En LIM->BSB los dos algoritmos hacen 1 escala, así que la tarjeta de BFS
+    # no puede afirmar "Menos escalas".
     buscar(page, "LIM", "BSB")
 
-    page.locator(".orden button").nth(1).click()
+    badge = page.locator(".tarjeta.bfs .etiqueta-opcion")
+    expect(badge).to_have_text("Mismas escalas")
+    expect(badge).not_to_have_text("Menos escalas")
 
-    primera = page.locator(".tarjeta").first
-    expect(primera).to_have_class(re.compile(r"\bdijkstra\b"))
+
+def test_badge_de_bfs_dice_menos_escalas_cuando_realmente_gana(page):
+    buscar(page, "BKI", "BIK")
+
+    expect(page.locator(".tarjeta.bfs .etiqueta-opcion")).to_have_text("Menos escalas")
+
+
+def test_solo_ida_hace_una_sola_busqueda(page):
+    page.click('[data-tipo="solo-ida"]')
+    buscar(page, "LIM", "BSB")
+
+    # Sin pestañas de tramo y sin total de ida y vuelta.
+    expect(page.locator("#selector-tramos")).to_be_hidden()
+    expect(page.locator("#res-total")).to_be_hidden()
+
+
+def test_ida_y_vuelta_calcula_los_dos_tramos(page):
+    page.click('[data-tipo="ida-vuelta"]')
+    buscar(page, "LIM", "BSB")
+
+    # Dos pestañas: ida y vuelta.
+    tramos = page.locator("#selector-tramos .tramo")
+    expect(tramos).to_have_count(2)
+    expect(tramos.nth(0)).to_contain_text("Ida")
+    expect(tramos.nth(1)).to_contain_text("Vuelta")
+
+    # La ida arranca en LIM.
+    expect(page.locator(".tarjeta.dijkstra .iata").first).to_have_text("LIM")
+
+    # Al cambiar de tramo, la vuelta arranca en BSB.
+    tramos.nth(1).click()
+    expect(page.locator(".tarjeta.dijkstra .iata").first).to_have_text("BSB")
+
+    # El total del viaje suma ida y vuelta.
+    expect(page.locator("#res-total")).to_be_visible()
+    expect(page.locator("#res-total")).to_contain_text("Ida y vuelta")
+    expect(page.locator("#res-total")).to_contain_text("total")
+
+
+def test_campo_vuelta_se_atenua_con_solo_ida(page):
+    page.click('[data-tipo="ida-vuelta"]')
+    expect(page.locator(".campo-vuelta")).not_to_have_class(re.compile(r"\binactivo\b"))
+
+    page.click('[data-tipo="solo-ida"]')
+    expect(page.locator(".campo-vuelta")).to_have_class(re.compile(r"\binactivo\b"))
 
 
 def test_boarding_pass_se_abre_y_se_cierra(page):
