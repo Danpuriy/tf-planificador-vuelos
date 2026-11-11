@@ -20,3 +20,6 @@ playwright-report/
 # Documentación interna (no se publica en el repo)
 GUIA_PARA_EL_GRUPO.md
 odd/
+
+# Borrador de mockup anterior (reemplazado por mockup/aerorutas.html)
+mockup/index.html

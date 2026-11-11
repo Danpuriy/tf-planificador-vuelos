@@ -1,12 +1,25 @@
-# Planificador de Vuelos · TF Complejidad Algorítmica
+# AeroRutas · Planificador de Vuelos
 
-Aplicación web que calcula y **visualiza rutas óptimas de vuelo** sobre un mapa
-de OpenStreetMap, comparando dos algoritmos:
+**TF — 1ACC0184 Complejidad Algorítmica · UPC 2026-20**
 
-- **BFS** → la ruta con **menos escalas** (mínimo número de tramos).
-- **Dijkstra** → la ruta con **menor distancia total** en kilómetros.
+Aplicación web que calcula y **visualiza rutas de vuelo** sobre un mapa de
+OpenStreetMap, comparando dos criterios de optimalidad y validando el resultado
+con un tercer algoritmo.
 
-Los datos vienen del dataset público **OpenFlights** (aeropuertos y rutas).
+🔗 **Demo en vivo:** https://tf-vuelos.onrender.com
+
+| Algoritmo | Optimiza | Complejidad |
+|---|---|---|
+| **BFS** | menos escalas (mínimo de tramos) | `O(V + E)` |
+| **Dijkstra** | menor distancia (km) | `O((V + E) log V)` |
+| **Bellman-Ford** | menor distancia (validación) | `O(V · E)` |
+
+BFS y Dijkstra son las dos **opciones de vuelo** que ve el usuario, porque
+optimizan cosas distintas. Bellman-Ford optimiza lo mismo que Dijkstra, así que
+no se ofrece como tercera opción: se usa como **validación independiente**. Si
+ambos coinciden, la ruta de menor distancia está bien calculada.
+
+Datos: dataset público **OpenFlights** (aeropuertos, aerolíneas y rutas).
 
 ---
 
@@ -15,19 +28,28 @@ Los datos vienen del dataset público **OpenFlights** (aeropuertos y rutas).
 ```
 TF/
 ├── app/
-│   ├── algoritmos.py       # Grafo + BFS + Dijkstra (núcleo, comentado)
-│   ├── cargador_datos.py   # Lee airports.dat y routes.dat, arma el grafo
-│   ├── servidor.py         # API con FastAPI (endpoints /api/...)
-│   └── static/             # Frontend: mapa, buscadores y resultados
+│   ├── algoritmos.py       # Grafo + BFS + Dijkstra + Bellman-Ford
+│   ├── cargador_datos.py   # Lee los .dat de OpenFlights y arma el grafo
+│   ├── servidor.py         # API con FastAPI
+│   └── static/             # Frontend (dos pantallas + mapa Leaflet)
 │       ├── index.html
 │       ├── styles.css
 │       └── app.js
 ├── data/
-│   ├── airports.dat        # Dataset OpenFlights: aeropuertos
-│   └── routes.dat          # Dataset OpenFlights: rutas
-├── requirements.txt
+│   ├── airports.dat        # OpenFlights: aeropuertos
+│   ├── airlines.dat        # OpenFlights: aerolíneas
+│   └── routes.dat          # OpenFlights: rutas
+├── mockup/
+│   └── aerorutas.html      # Referencia visual aprobada (una sola página)
+├── tests/
+│   ├── test_algoritmos.py
+│   ├── test_cargador_datos.py
+│   ├── test_api.py
+│   └── e2e/test_e2e.py     # Playwright
+├── requirements.txt        # Producción
+├── requirements-dev.txt    # Desarrollo y pruebas
 ├── Dockerfile
-├── render.yaml             # Despliegue opcional en Render
+├── render.yaml
 └── README.md
 ```
 
@@ -36,7 +58,7 @@ TF/
 ## Requisitos
 
 - Python 3.9 o superior.
-- Conexión a internet (el mapa usa teselas de OpenStreetMap y Leaflet por CDN).
+- Conexión a internet: el mapa usa Leaflet y teselas de OpenStreetMap por CDN.
 
 ---
 
@@ -45,134 +67,160 @@ TF/
 Desde la carpeta `TF/`:
 
 ```bash
-# 1) Crear y activar el entorno virtual
 python3 -m venv .venv
-source .venv/bin/activate        # en Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# 2) Instalar dependencias
 pip install -r requirements.txt
 
-# 3) Entrar a la carpeta de la app y levantar el servidor
 cd app
 uvicorn servidor:app --reload
 ```
 
-Abre en el navegador: **http://127.0.0.1:8000**
+Abrir en el navegador: **http://127.0.0.1:8000**
 
-> Importante: el servidor se ejecuta **dentro de `app/`**, porque `cargador_datos.py`
-> busca los `.dat` en `../data`.
+> El servidor se ejecuta **dentro de `app/`** porque `cargador_datos.py` busca
+> los `.dat` en `../data`.
+
+Para probar los algoritmos sin levantar el servidor:
+
+```bash
+python app/algoritmos.py       # autotest: BFS vs Dijkstra vs Bellman-Ford
+python app/cargador_datos.py   # conteos del dataset + ruta de ejemplo
+```
 
 ---
 
-## Pruebas (QA)
-
-Desde la carpeta `TF/`:
+## Pruebas
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
+.venv/bin/playwright install chromium   # solo la primera vez (~100 MB)
+
+pytest                                  # todo
+pytest tests/e2e                        # solo navegador real
+pytest -m "not e2e"                     # todo menos el navegador
 ```
 
-Son **44 pruebas** (37 de lógica/API + 7 end-to-end) y cubren:
+**78 pruebas en verde**, en unos 15 segundos:
 
-- **Haversine**: distancia cero, simetría, un grado de longitud.
-- **Grafo**: nodos idempotentes, aristas duplicadas, nodos inexistentes, grados.
-- **BFS**: directo, mínimo de tramos, dirección de las aristas, sin ruta.
-- **Dijkstra**: menor distancia, directo, sin ruta.
-- **Fuerza bruta**: en 40 grafos aleatorios se enumeran TODOS los caminos simples
-  y se comprueba que BFS da el mínimo de tramos y Dijkstra la mínima distancia.
-- **Dataset real**: 6,072 aeropuertos, 36,707 rutas, LIM→SCL, empate LIM→BSB.
-- **API HTTP**: 200 en los endpoints, 404 para aeropuertos inexistentes,
-  422 si faltan parámetros, y que la página y los estáticos se sirvan.
-- **E2E (navegador real)**: Chromium abre la app, usa el autocompletado, busca
-  LIM→BSB y LIM→SCL, y verifica las tarjetas, el texto de empate y que el mapa
-  dibuje las rutas.
+| Archivo | Pruebas | Qué cubre |
+|---|---|---|
+| `test_algoritmos.py` | 30 | Haversine, grafo, BFS, Dijkstra, Bellman-Ford y verificación por fuerza bruta en grafos aleatorios |
+| `test_api.py` | 19 | Endpoints 200/404/422, estáticos y casos límite |
+| `test_cargador_datos.py` | 7 | Parseo de los `.dat`, nulos `\N`, unión por ID |
+| `e2e/test_e2e.py` | 22 | Navegador real: autocompletado, tarjetas, tooltips, validación, boarding pass, ida y vuelta, mobile |
 
-La primera vez hay que descargar el navegador de Playwright (~100 MB):
-
-```bash
-.venv/bin/playwright install chromium
-```
-
-Comandos útiles:
-
-```bash
-.venv/bin/python -m pytest              # todo (44 pruebas)
-.venv/bin/python -m pytest tests/e2e    # solo navegador
-.venv/bin/python -m pytest -m "not e2e" # todo menos el navegador
-```
-
-> Las pruebas de API y E2E usan el dataset real. La suite completa tarda ~4 s.
+La verificación por fuerza bruta enumera **todos los caminos simples** en grafos
+aleatorios y comprueba que BFS devuelve el mínimo de tramos y que Dijkstra y
+Bellman-Ford devuelven la mínima distancia.
 
 ---
 
-## API (por si quieres probarla con curl)
+## API
 
 | Endpoint | Qué devuelve |
 |---|---|
 | `GET /health` | Estado del servidor y conteo de aeropuertos/rutas |
 | `GET /api/estadisticas` | Totales del grafo |
-| `GET /api/aeropuertos?q=LIM&limite=10` | Buscador de aeropuertos (autocompletado) |
-| `GET /api/ruta?origen=LIM&destino=SCL` | Resultado de BFS y Dijkstra con los puntos del mapa |
+| `GET /api/aeropuertos?q=LIM&limite=10` | Buscador para el autocompletado |
+| `GET /api/ruta?origen=LIM&destino=BSB` | BFS y Dijkstra con los puntos del mapa |
+| `GET /api/ruta?origen=LIM&destino=BSB&validar=true` | Agrega Bellman-Ford y la comparación |
 
-Ejemplo:
+`validar` es **opcional a propósito**: Bellman-Ford cuesta `O(V · E)` y no hace
+falta para dibujar la pantalla. Medido en local: **1.75 ms** sin validar contra
+**17.58 ms** con validar.
 
 ```bash
-curl "http://127.0.0.1:8000/api/ruta?origen=LIM&destino=SCL"
+curl "http://127.0.0.1:8000/api/ruta?origen=LIM&destino=BSB&validar=true"
 ```
 
 ---
 
-## Desplegar en Render (gratis)
+## Modelo de tiempo y costo
 
-### Opción A — Blueprint (más rápido)
+El dataset **no trae** precios, horarios ni duración: solo origen, destino y
+aerolínea. Por eso tiempo y costo son un **modelo declarado**, no datos reales.
+Las constantes están en `app/algoritmos.py` y se pueden cambiar en un solo lugar.
 
-1. Sube el proyecto a un repositorio de GitHub (solo la carpeta `TF/` o el repo completo).
-2. En Render: **New → Blueprint**, elige el repo y confirma. Render lee `render.yaml`
-   y crea el servicio con Docker automáticamente.
+```
+tiempo_tramo = km / 850 km/h + 45 min de rodaje
+tiempo_total = suma de tramos + 90 min por cada escala
+
+costo_tramo  = 40 USD + km × 0.09 USD/km
+```
+
+Cada tramo lleva una variación determinística de ±8 % derivada de
+`sha256(origen-destino)`, para que dos rutas del mismo largo no den idéntico.
+Se usa `sha256` y no `hash()` porque el hash de Python cambia entre procesos.
+
+En el frontend los horarios son **de referencia**: el primer tramo sale 08:35 y
+cada escala suma 90 minutos. Las fechas son cosméticas; el grafo es estático.
+
+---
+
+## Algoritmos
+
+- **BFS** (`bfs_min_escalas`): recorre por niveles; en un grafo sin pesos el
+  primer camino que llega al destino tiene la menor cantidad de aristas.
+  **No mira kilómetros**, así que entre varias rutas con las mismas escalas
+  devuelve la primera que encuentra.
+- **Dijkstra** (`dijkstra_min_distancia`): cola de prioridad (`heapq`) sobre
+  pesos positivos; devuelve la distancia mínima.
+- **Bellman-Ford** (`bellman_ford_min_distancia`): relaja todas las aristas
+  `V-1` veces, con **terminación temprana** cuando una pasada no cambia nada.
+  Sirve para validar y además detecta ciclos negativos (que con distancias
+  Haversine nunca ocurren, pero el algoritmo los reporta).
+
+Los tres devuelven un `ResultadoRuta` con camino, distancia total, tramos,
+escalas, tiempo, costo y cuántos nodos se visitaron.
+
+### Caso de referencia: LIM → BSB
+
+| Algoritmo | Ruta | km | Tiempo | Costo | Visitados |
+|---|---|---|---|---|---|
+| BFS | LIM → MIA → BSB | 10,026.55 | 888 min | $ 1,048.84 | 10 |
+| Dijkstra | LIM → GRU → BSB | 4,329.52 | 486 min | $ 470.25 | 317 |
+| Bellman-Ford | LIM → GRU → BSB | 4,329.52 | 486 min | $ 470.25 | 8,643 (7 pasadas) |
+
+Los dos caminos tienen **la misma cantidad de escalas**, pero difieren en
+**5,697.03 km**. Es el ejemplo que mejor muestra que BFS y Dijkstra no son
+intercambiables: optimizan cosas distintas.
+
+Donde BFS sí gana en escalas es, por ejemplo, en **BKI → BIK**: BFS hace 2
+escalas y Dijkstra 3, porque para ahorrar kilómetros Dijkstra acepta una escala
+más. La interfaz muestra esa diferencia de forma explícita.
+
+---
+
+## Datos y limitaciones
+
+- Dataset: **OpenFlights** (`airports.dat`, `airlines.dat`, `routes.dat`).
+- **6,072 aeropuertos**, **36,707 rutas únicas**, **6,162 aerolíneas**
+  (muy por encima del mínimo de 1,500 nodos del curso).
+- Unión aerolínea ↔ ruta **por ID numérico**, no por código IATA.
+- Pesos = distancia real en km por **Haversine**.
+- Limitaciones a declarar: el dataset es una fotografía histórica (no vuelos en
+  tiempo real), no incluye precios ni horarios, y no modela capacidad de vuelos.
+
+---
+
+## Desplegar en Render
+
+### Opción A — Blueprint
+
+1. Subir el repo a GitHub.
+2. Render → **New → Blueprint** → elegir el repo. `render.yaml` crea el servicio
+   Docker automáticamente.
 
 ### Opción B — Manual
 
-1. Sube el proyecto a GitHub.
-2. En Render: **New → Web Service** → conecta el repo.
-3. En **Language / Runtime** elige **Docker**.
-4. Render detecta el `Dockerfile`. Deja el resto por defecto.
-5. **Create Web Service**.
+1. Render → **New → Web Service** → conectar el repo.
+2. Runtime: **Docker** (Render detecta el `Dockerfile`).
+3. **Create Web Service**.
 
-Cuando termine el despliegue, Render te da una URL pública
-(`https://tf-vuelos-xxxx.onrender.com`). Esa es la que usas en la exposición.
-
-> ⚠️ El plan gratuito **duerme** el servicio tras unos minutos sin uso. La primera
-> visita puede tardar **30–60 segundos** en despertar. Durante la exposición,
-> **abre la URL unos minutos antes** para "precalentarla".
-
----
-
-## Datos y alcance
-
-- Dataset: OpenFlights (`airports.dat` + `routes.dat`).
-- Se conservan **6,072 aeropuertos** y **36,707 rutas únicas** (más que el mínimo
-  de 1,500 nodos que pide el curso).
-- Los pesos de las aristas son distancias reales calculadas con la fórmula de
-  **Haversine** (km).
-- Limitaciones a declarar en el informe: el dataset no incluye precios, horarios
-  ni capacidad; es una fotografía histórica, no vuelos en tiempo real.
-
----
-
-## Algoritmos implementados
-
-- **BFS** (`bfs_min_escalas`): recorre el grafo por niveles; en un grafo sin pesos
-  devuelve el camino con menos aristas = menos escalas. Complejidad `O(V + E)`.
-  Si hay varias rutas con el **mismo número de escalas**, devuelve la primera que
-  encuentra (no necesariamente la de menos km). Ejemplo: `LIM → BSB` tiene 8 rutas
-  con 1 escala; BFS puede devolver `LIM → MIA → BSB` (10,026 km) mientras Dijkstra
-  devuelve `LIM → GRU → BSB` (4,329 km).
-- **Dijkstra** (`dijkstra_min_distancia`): con cola de prioridad (`heapq`) sobre
-  pesos positivos (km); devuelve la distancia mínima. Complejidad `O((V + E) log V)`.
-
-Ambos devuelven un `ResultadoRuta` con: camino, distancia total, tramos, escalas
-y cuántos nodos se visitaron (útil para comparar en el informe).
+> ⚠️ El plan gratuito **duerme** el servicio tras unos minutos sin uso. La
+> primera visita puede tardar **30–60 segundos**. Antes de la exposición, abrir
+> la URL unos minutos antes para precalentarla.
 
 ---
 
